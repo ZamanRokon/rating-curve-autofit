@@ -93,7 +93,7 @@ Each run creates a timestamped output folder with:
 - `plots/residual_qq_plot.png`
 - `plots/model_comparison.png`
 
-## Main Sources And Credit
+## Main Sources
 
 This script is informed by published rating-curve methods and public documentation:
 

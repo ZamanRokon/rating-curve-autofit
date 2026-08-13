@@ -36,27 +36,21 @@ Optional output folder:
 python rating_curve_autofit.py your_data.csv --out rating_curve_results
 ```
 
-## Model
+### Model
 
 The script uses a power-law stage-discharge relationship.
 
 Single segment:
 
-```text
 $$Q = \alpha_1 (h - h_1)^{\beta_1}$$
-```
 
 Two segment addition mode:
 
-```text
 $$Q = \alpha_1 (h - h_1)^{\beta_1} + \alpha_2 (h - h_2)^{\beta_2} \cdot \mathbb{I}(h > h_2)$$
-```
 
 Three segment addition mode:
 
-```text
 $$Q = \alpha_1 (h - h_1)^{\beta_1} + \alpha_2 (h - h_2)^{\beta_2} \cdot \mathbb{I}(h > h_2) + \alpha_3 (h - h_3)^{\beta_3} \cdot \mathbb{I}(h > h_3)$$
-```
 
 Errors are fit in log10 discharge space.
 

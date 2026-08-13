@@ -1,12 +1,11 @@
 """
 Simple rating-curve autofit script.
-
 Input CSV columns by default:
     date, wl, discharge
-
+    
 Run:
     python rating_curve_autofit.py input.csv
-
+    
 Or edit the USER SETTINGS block below and run:
     python rating_curve_autofit.py
 
@@ -29,10 +28,7 @@ from scipy.optimize import differential_evolution, minimize
 from scipy.stats import probplot
 
 
-# =============================================================================
 # USER SETTINGS
-# =============================================================================
-
 INPUT_CSV = ""  # Example: r"C:\path\to\input.csv"; leave blank to use command line.
 OUTPUT_ROOT = "rating_curve_results"
 
@@ -45,11 +41,7 @@ RATING_TABLE_POINTS = 100
 RANDOM_SEED = 12345
 
 
-# =============================================================================
 # MODEL FUNCTIONS
-# =============================================================================
-
-
 def parameter_names(n_segments: int) -> list[str]:
     names: list[str] = []
     for i in range(1, n_segments + 1):
@@ -131,14 +123,7 @@ def make_bounds(stage: np.ndarray, discharge: np.ndarray, n_segments: int) -> li
             h_bounds = (s_min + 0.10 * s_range, s_min + 0.90 * s_range)
         else:
             h_bounds = (s_min + 0.35 * s_range, s_min + 0.98 * s_range)
-
-        bounds.extend(
-            [
-                h_bounds,
-                (max(-10.0, approx_log_alpha_min), min(10.0, approx_log_alpha_max)),
-                (0.05, 5.0),
-            ]
-        )
+        bounds.extend([h_bounds,(max(-10.0, approx_log_alpha_min), min(10.0, approx_log_alpha_max)),(0.05, 5.0),])
 
     return bounds
 
@@ -175,7 +160,7 @@ def fit_model(stage: np.ndarray, discharge: np.ndarray, n_segments: int) -> dict
     sigma = math.sqrt(max(sse / n, 1e-30))
     log_likelihood = -0.5 * n * math.log(2.0 * math.pi) - n * math.log(sigma) - sse / (2.0 * sigma * sigma)
 
-    k = 3 * n_segments + 1  # fitted curve parameters plus sigma
+    k = 3 * n_segments + 1
     aic = 2.0 * k - 2.0 * log_likelihood
     bic = k * math.log(n) - 2.0 * log_likelihood
     rmse_log10 = math.sqrt(sse / n)
@@ -221,12 +206,7 @@ def equation_text(fit: dict, digits: int = 6) -> str:
 
     return "Q(h) = " + " + ".join(parts)
 
-
-# =============================================================================
 # INPUT / OUTPUT
-# =============================================================================
-
-
 def read_input_csv(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path)
     required = [DATE_COLUMN, STAGE_COLUMN, DISCHARGE_COLUMN]
@@ -252,7 +232,6 @@ def read_input_csv(path: Path) -> pd.DataFrame:
 def choose_best_model(fits: list[dict]) -> dict:
     # BIC is the primary default because it penalizes unnecessary extra segments strongly.
     return min(fits, key=lambda item: item["bic"])
-
 
 def save_tables(out_dir: Path, data: pd.DataFrame, fits: list[dict], best: dict) -> None:
     data.to_csv(out_dir / "cleaned_data.csv", index=False)
@@ -335,7 +314,7 @@ def save_plots(out_dir: Path, data: pd.DataFrame, fits: list[dict], best: dict) 
     plt.legend()
     plt.grid(True, alpha=0.25)
     plt.tight_layout()
-    plt.savefig(plots_dir / "rating_curve.png", dpi=180)
+    plt.savefig(plots_dir / "rating_curve.png", dpi=300)
     plt.close()
 
     plt.figure(figsize=(9, 6))
@@ -349,7 +328,7 @@ def save_plots(out_dir: Path, data: pd.DataFrame, fits: list[dict], best: dict) 
     plt.legend()
     plt.grid(True, alpha=0.25, which="both")
     plt.tight_layout()
-    plt.savefig(plots_dir / "rating_curve_log_scale.png", dpi=180)
+    plt.savefig(plots_dir / "rating_curve_log_scale.png", dpi=300)
     plt.close()
 
     residuals = best["residuals"]
@@ -362,7 +341,7 @@ def save_plots(out_dir: Path, data: pd.DataFrame, fits: list[dict], best: dict) 
     plt.title("Residuals vs Stage")
     plt.grid(True, alpha=0.25)
     plt.tight_layout()
-    plt.savefig(plots_dir / "residuals_vs_stage.png", dpi=180)
+    plt.savefig(plots_dir / "residuals_vs_stage.png", dpi=300)
     plt.close()
 
     plt.figure(figsize=(8, 5))
@@ -371,14 +350,14 @@ def save_plots(out_dir: Path, data: pd.DataFrame, fits: list[dict], best: dict) 
     plt.ylabel("Count")
     plt.title("Residual Histogram")
     plt.tight_layout()
-    plt.savefig(plots_dir / "residual_histogram.png", dpi=180)
+    plt.savefig(plots_dir / "residual_histogram.png", dpi=300)
     plt.close()
 
     plt.figure(figsize=(6, 6))
     probplot(residuals, dist="norm", plot=plt)
     plt.title("Residual Q-Q Plot")
     plt.tight_layout()
-    plt.savefig(plots_dir / "residual_qq_plot.png", dpi=180)
+    plt.savefig(plots_dir / "residual_qq_plot.png", dpi=300)
     plt.close()
 
     comparison = pd.DataFrame(
@@ -394,7 +373,7 @@ def save_plots(out_dir: Path, data: pd.DataFrame, fits: list[dict], best: dict) 
     ax.set_title("Model Comparison")
     ax.grid(True, alpha=0.25)
     plt.tight_layout()
-    plt.savefig(plots_dir / "model_comparison.png", dpi=180)
+    plt.savefig(plots_dir / "model_comparison.png", dpi=300)
     plt.close()
 
 

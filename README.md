@@ -16,21 +16,7 @@ date,wl,discharge
 2025-01-02,1.20,18.0
 ```
 
-You can change the column names at the top of `rating_curve_autofit.py`:
-
-```python
-DATE_COLUMN = "date"
-STAGE_COLUMN = "wl"
-DISCHARGE_COLUMN = "discharge"
-```
-
 ## Run
-
-Install requirements:
-
-```powershell
-pip install -r requirements.txt
-```
 
 Run with the sample file:
 
@@ -57,19 +43,19 @@ The script uses a power-law stage-discharge relationship.
 Single segment:
 
 ```text
-Q = alpha1 * (h - h1)^beta1
+$$Q = \alpha_1 (h - h_1)^{\beta_1}$$
 ```
 
 Two segment addition mode:
 
 ```text
-Q = alpha1 * (h - h1)^beta1 + alpha2 * (h - h2)^beta2 * I(h > h2)
+$$Q = \alpha_1 (h - h_1)^{\beta_1} + \alpha_2 (h - h_2)^{\beta_2} \cdot \mathbb{I}(h > h_2)$$
 ```
 
 Three segment addition mode:
 
 ```text
-Q = alpha1 * (h - h1)^beta1 + alpha2 * (h - h2)^beta2 * I(h > h2) + alpha3 * (h - h3)^beta3 * I(h > h3)
+$$Q = \alpha_1 (h - h_1)^{\beta_1} + \alpha_2 (h - h_2)^{\beta_2} \cdot \mathbb{I}(h > h_2) + \alpha_3 (h - h_3)^{\beta_3} \cdot \mathbb{I}(h > h_3)$$
 ```
 
 Errors are fit in log10 discharge space.

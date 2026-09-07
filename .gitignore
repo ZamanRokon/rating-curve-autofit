@@ -7,3 +7,23 @@ env/
 rating_curve_results/
 test_outputs/
 *.log
+
+# Generated outputs and build products
+universal_rating_results/
+outputs/
+results/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local environments and secrets
+.env
+.env.*
+!.env.example
+*.joblib
+.DS_Store
+Thumbs.db

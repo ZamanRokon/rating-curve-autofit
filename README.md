@@ -1,92 +1,130 @@
 # Rating Curve Autofit
 
-A simple standalone Python script for fitting stage-discharge rating curves from a CSV file containing date, water level, and discharge observations.
+Fit stage–discharge rating curves from CSV measurements, compare candidate curves, and export equations, diagnostics, uncertainty estimates, and rating tables. Two methods live in one Python package so their assumptions and results remain explicit.
 
-The script reads paired observations, fits 1-, 2-, and 3-segment power-law rating curves, selects the best model using BIC, and writes tables, plots, model parameters, equations, and a short report into an output folder.
+| Method | What it does | Choose it when |
+|---|---|---|
+| **`additive`** | Fits one to three additive power-law terms in log discharge; selects with cross-validation and estimates bootstrap intervals. | You want the repository's original empirical method, positive-flow fitting, and separate median/mean rating tables. |
+| **`validated`** | Fits one or two regimes with matching value and slope, evaluates the full selection procedure with nested validation, and optionally predicts a daily series. | You want daily discharge estimates, explicit shape constraints, zero-flow handling, and complete-pipeline validation. |
 
-This project is an independent educational/research automation script. It is not affiliated with or endorsed by USACE-RMC, IWR, ERDC-CHL, or BaRatin-tools.
+Both methods are empirical tools for one station and a consistent stage datum. They do not automatically establish hydraulic controls or resolve backwater, reversing flow, changing controls, or hysteresis. The `validated` name describes its validation workflow; it is not a certification of any station's rating. See the [method comparison](docs/methods.md).
 
-## Input CSV
+## Install
 
-Default column names:
+Requires **Python 3.10 or later**. From a terminal:
+
+```sh
+git clone https://github.com/ZamanRokon/rating-curve-autofit.git
+cd rating-curve-autofit
+python -m venv .venv
+```
+
+Activate the environment on Windows PowerShell:
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+Or on macOS/Linux:
+
+```sh
+source .venv/bin/activate
+```
+
+Then install from the checkout:
+
+```sh
+python -m pip install -e .
+```
+
+If your shell cannot find `rating-curve`, use `python -m ratingcurve_autofit` with the same arguments. The package is installed from this repository; these instructions do not assume a PyPI release.
+
+## Try both methods
+
+The included [measurement](examples/measurements.csv) and [daily stage](examples/daily_stage.csv) files are **synthetic**, provided to exercise the software. They are not field observations or evidence of accuracy at a real station.
+
+Start with a smaller additive run:
+
+```sh
+rating-curve additive examples/measurements.csv --max-segments 1 --bootstrap 0 --out results/additive
+```
+
+Compare up to three additive terms and request the default 200 bootstrap resamples:
+
+```sh
+rating-curve additive examples/measurements.csv --out results/additive
+```
+
+Fit the smooth method and calculate discharge for daily stages:
+
+```sh
+rating-curve validated examples/measurements.csv --daily examples/daily_stage.csv --date-format "%Y-%m-%d" --out results/validated
+```
+
+To require upward curvature, add `--shape convex` to the `validated` command. Convexity allows a straight branch when its exponent is one. The default `monotone` constraint allows either curvature while keeping the stage-only rating nondecreasing.
+
+Each run writes a timestamped subfolder and prints its location. Read that run's `report.md` first. Bootstrap and nested fits can take several minutes; the first command disables bootstrap for a quick check, so it does not produce uncertainty intervals.
+
+## Use your data
+
+A common CSV format works with both methods:
 
 ```csv
 date,wl,discharge
-2025-01-01,1.00,12.4
-2025-01-02,1.20,18.0
+2020-01-01,1.20,8.40
+2020-01-15,1.55,15.70
+2020-02-01,2.10,33.50
 ```
 
-## Run
+This illustrates the schema only: a run needs **at least 20 usable observations**, and more may be necessary for validation and multiple regimes. Dates are recommended. Use one set of stage and discharge units throughout; unit options change labels and do not convert numbers.
 
-Run with the sample file:
+For daily prediction with `validated`, supply a second file:
 
-```powershell
-python rating_curve_autofit.py sample_rating_data.csv
+```csv
+date,wl
+2020-01-01,1.20
+2020-01-02,1.25
+2020-01-03,1.18
 ```
 
-Run with your own CSV:
+Replace the example paths in the commands with your files. The `validated` loader recognizes common header aliases and provides explicit column and date-format overrides. The additive workflow uses the `wl`, `discharge`, and optional `date` schema above.
 
-```powershell
-python rating_curve_autofit.py your_data.csv
+| Guide | Contents |
+|---|---|
+| [Method comparison](docs/methods.md) | Equations, selection, shape, uncertainty, and fair comparisons. |
+| [Additive method](docs/additive.md) | Input requirements, options, bootstrap outputs, and Python use. |
+| [Validated method](docs/validated.md) | Input mapping, daily features, nested validation, optional RF, and saved models. |
+
+## Optional random forest
+
+The `validated` method uses the stage-only curve by default. To let its inner validation compare random-forest residual corrections:
+
+```sh
+python -m pip install -e ".[rf]"
+rating-curve validated examples/measurements.csv --daily examples/daily_stage.csv --rf --out results/validated_rf
 ```
 
-Optional output folder:
+`--rf` requires a daily stage file and sufficient usable daily stage changes in the training folds. It does not force selection of the forest. A selected correction varies with daily stage change and does not inherit the static curve's monotonicity or convexity guarantee.
 
-```powershell
-python rating_curve_autofit.py your_data.csv --out rating_curve_results
+## Compatibility and development
+
+The original source-checkout command remains available:
+
+```sh
+python rating_curve_autofit.py examples/measurements.csv --max-segments 1 --bootstrap 0
 ```
 
-### Model
+The smooth method also has a source launcher, `universal_rating_curve.py`. Installation is recommended for imports and the unified command. New Python code should import from `ratingcurve_autofit`, rather than rely on the old standalone module layout.
 
-The script uses a power-law stage-discharge relationship.
+For development:
 
-Single segment:
+```sh
+python -m pip install -e ".[dev,rf]"
+python -m pytest
+```
 
-$$Q = \alpha_1 (h - h_1)^{\beta_1}$$
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and [CHANGELOG.md](CHANGELOG.md) for changes. Keep station data and generated result folders outside commits; the public examples are synthetic.
 
-Two segment addition mode:
+## License and credit
 
-$$Q = \alpha_1 (h - h_1)^{\beta_1} + \alpha_2 (h - h_2)^{\beta_2} \cdot \mathbb{I}(h > h_2)$$
-
-Three segment addition mode:
-
-$$Q = \alpha_1 (h - h_1)^{\beta_1} + \alpha_2 (h - h_2)^{\beta_2} \cdot \mathbb{I}(h > h_2) + \alpha_3 (h - h_3)^{\beta_3} \cdot \mathbb{I}(h > h_3)$$
-
-Errors are fit in log10 discharge space.
-
-## Outputs
-
-Each run creates a timestamped output folder with:
-
-- `cleaned_data.csv`
-- `best_parameters.csv`
-- `best_model.json`
-- `equation.txt`
-- `model_comparison.csv`
-- `fitted_values_and_residuals.csv`
-- `rating_table.csv`
-- `report.md`
-- `plots/rating_curve.png`
-- `plots/rating_curve_log_scale.png`
-- `plots/residuals_vs_stage.png`
-- `plots/residual_histogram.png`
-- `plots/residual_qq_plot.png`
-- `plots/model_comparison.png`
-
-## Main Sources
-
-This script is informed by published rating-curve methods and public documentation:
-
-- RMC-BestFit GitHub repository: https://github.com/USACE-RMC/RMC-BestFit
-- RMC-BestFit rating-curve technical reference: https://github.com/USACE-RMC/RMC-BestFit/blob/main/docs/technical-reference/analysis/rating-curve.md
-- RMC-BestFit software page: https://www.rmc.usace.army.mil/Software/RMC-BestFit/
-- BaRatin computational engine: https://github.com/BaRatin-tools/BaRatin
-- BaRatin rating-curve Fortran source: https://github.com/BaRatin-tools/BaRatin/blob/main/src/RatingCurve_tools.f90
-
-See `SOURCES_AND_CREDIT.md` for more notes.
-
-## License Note
-
-This repository is licensed under the MIT License.
-
-RMC-BestFit is published under the Zero-Clause BSD license. BaRatin is published under GPL-3.0. If this script is changed to directly copy or translate BaRatin GPL-3.0 source code, the derived work should be distributed under GPL-3.0-compatible terms.
+The repository retains its [MIT license](LICENSE) and the original additive method's attribution. It is an independent project, not affiliated with or endorsed by USACE-RMC, IWR, ERDC-CHL, or BaRatin-tools. Published hydraulic methods inform the work; neither backend is a Bayesian BaRatin implementation. References and implementation provenance are recorded in [SOURCES_AND_CREDIT.md](SOURCES_AND_CREDIT.md).

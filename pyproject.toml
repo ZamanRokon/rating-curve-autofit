@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rating-curve-autofit"
+version = "0.2.0"
+description = "Additive and smooth validated stage-discharge rating curves from CSV data"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Rokon"}]
+keywords = ["hydrology", "rating-curve", "stage-discharge", "streamflow"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = ["numpy>=1.24", "pandas>=2.0", "scipy>=1.10", "matplotlib>=3.7"]
+
+[project.optional-dependencies]
+rf = ["scikit-learn>=1.3", "joblib>=1.3"]
+dev = ["pytest>=7", "ruff>=0.6", "build>=1.2", "twine>=5"]
+
+[project.scripts]
+rating-curve = "ratingcurve_autofit.cli:main"
+
+[project.urls]
+Repository = "https://github.com/ZamanRokon/rating-curve-autofit"
+Issues = "https://github.com/ZamanRokon/rating-curve-autofit/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]

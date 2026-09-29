@@ -31,12 +31,14 @@ Regenerate both files from the repository root:
 python examples/generate_examples.py
 ```
 
-After installing the package, run either workflow:
+After installing the libraries, try the starter from the repository root:
 
 ```bash
-python -m ratingcurve_autofit additive examples/measurements.csv --max-segments 1 --bootstrap 0
-python -m ratingcurve_autofit validated examples/measurements.csv --daily examples/daily_stage.csv --max-segments 1 --folds 3 --inner-folds 3
+python run_rating_curve.py
 ```
+
+Set `DAILY_STAGES = "examples/daily_stage.csv"` in the script to also calculate
+daily discharge. See [advanced use](../docs/advanced.md) for the additive method.
 
 This simple single-control relationship demonstrates the input format and
 software behavior. It is not a realistic hydrological benchmark or evidence of

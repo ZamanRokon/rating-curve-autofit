@@ -10,7 +10,7 @@ From an installed checkout:
 rating-curve additive examples/measurements.csv --out results/additive
 ```
 
-Equivalent commands are `python -m ratingcurve_autofit additive ...` and, from the repository root, `python rating_curve_autofit.py ...`.
+Equivalent commands are `python -m ratingcurve_autofit additive ...` and, from the repository root, `python legacy/rating_curve_autofit.py ...`. For an editable Python example, see [advanced use](advanced.md#use-the-original-additive-method).
 
 A smaller run without bootstrap:
 

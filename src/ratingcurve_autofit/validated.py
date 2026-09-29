@@ -5,13 +5,11 @@ See docs/validated.md for settings, assumptions and output definitions.
 """
 from __future__ import annotations
 
-import argparse
 from dataclasses import asdict, dataclass
 from datetime import datetime
 import hashlib
 import json
 from pathlib import Path
-import sys
 
 import numpy as np
 import pandas as pd
@@ -347,27 +345,67 @@ def plots(out, observed, daily, rating, oof, pipeline, stage_unit, discharge_uni
         plt.close(fig)
 
 
-def run(args):
-    settings = Settings(shape=args.shape, max_segments=args.max_segments, min_regime=args.min_regime,
-                        threshold=args.threshold, folds=args.folds, inner_folds=args.inner_folds,
-                        selection_metric=args.selection_metric, rf=args.rf, seed=args.seed, coverage=args.coverage)
-    if args.rf:
+def fit_rating_curve(
+    measurements: str | Path,
+    *,
+    daily_stages: str | Path | None = None,
+    output_folder: str | Path | None = None,
+    stage_unit: str = 'm',
+    discharge_unit: str = 'm3/s',
+    date_format: str | None = None,
+    date_col: str | None = None,
+    stage_col: str | None = None,
+    discharge_col: str | None = None,
+    daily_date_col: str | None = None,
+    daily_stage_col: str | None = None,
+    dayfirst: bool = False,
+    settings: Settings | None = None,
+) -> Path:
+    """Fit the smooth rating, save plots/tables/report, and return the run folder.
+
+    Only ``measurements`` is required. CSVs normally contain ``date,wl,discharge``
+    (measurements) or ``date,wl`` (daily stages); measurement dates are optional.
+    Use ``date_format='%Y-%m-%d'`` for ISO dates. Units label outputs only.
+    Paths are relative to the caller's working directory. Each run creates a
+    new folder; inputs and previous results are preserved.
+
+    The default compares one/two regimes with nested validation and no random
+    forest. Advanced fitting choices can be supplied through ``Settings``.
+    This function raises ValueError for invalid settings/data and OSError for
+    unreadable inputs or unwritable outputs. See docs/validated.md for details.
+    """
+    settings = settings or Settings()
+    if settings.shape not in {'monotone', 'convex'}:
+        raise ValueError("shape must be 'monotone' or 'convex'")
+    if settings.max_segments not in (1, 2):
+        raise ValueError('max_segments must be 1 or 2')
+    if settings.folds < 2 or settings.inner_folds < 2 or settings.min_regime < 5:
+        raise ValueError('folds and inner_folds must be >=2; min_regime must be >=5')
+    if not .5 < settings.coverage < 1:
+        raise ValueError('coverage must be between 0.5 and 1 (exclusive)')
+    if settings.selection_metric not in {'RMSE', 'RMSLE'}:
+        raise ValueError("selection_metric must be 'RMSE' or 'RMSLE'")
+    if settings.threshold is not None and settings.max_segments != 2:
+        raise ValueError('threshold requires max_segments=2')
+    measurements = Path(measurements).expanduser().resolve()
+    daily_stages = Path(daily_stages).expanduser().resolve() if daily_stages is not None else None
+    if settings.rf:
         try:
             import sklearn  # noqa: F401
         except ImportError as exc:
-            raise ValueError('Optional RF requires scikit-learn. Install it or run without --rf.') from exc
-    loaded = load_inputs(args.observations, args.daily, date_col=args.date_col,
-                         stage_col=args.stage_col, discharge_col=args.discharge_col,
-                         daily_date_col=args.daily_date_col, daily_stage_col=args.daily_stage_col,
-                         date_format=args.date_format, dayfirst=args.dayfirst)
+            raise ValueError('Optional RF requires scikit-learn. Install it or use rf=False.') from exc
+    loaded = load_inputs(measurements, daily_stages, date_col=date_col,
+                         stage_col=stage_col, discharge_col=discharge_col,
+                         daily_date_col=daily_date_col, daily_stage_col=daily_stage_col,
+                         date_format=date_format, dayfirst=dayfirst)
     obs, daily = loaded['observations'], loaded['daily']
     obs = obs.reset_index(drop=True)
     if len(obs) < 20:
         raise ValueError(f'Only {len(obs)} valid measurements remain. At least 20 are required for nested model selection; more are needed for two regimes.')
     if obs.Q.max() <= 0 or obs.Q.nunique() < 2 or obs.WL.nunique() < 5:
         raise ValueError('Need varying discharge with positive values and at least five distinct water levels.')
-    if args.rf and daily is None:
-        raise ValueError('--rf requires a daily WL file so training and prediction share the same daily dWL feature.')
+    if settings.rf and daily is None:
+        raise ValueError('RF requires a daily WL file so training and prediction share the same daily dWL feature.')
     if daily is not None and daily.empty:
         raise ValueError('The daily CSV has no valid rows after parsing dates and water levels. Check column mapping and date format.')
     print(f'Loaded {len(obs)} discharge measurements'+(f' and {len(daily)} daily stages.' if daily is not None else '.'), flush=True)
@@ -392,8 +430,8 @@ def run(args):
         notes.append(f'Limited held-out skill: overall NSE={full_score["NSE"]:.3f}. Review temporal shifts and measurement quality before relying on estimates.')
     if score_rows[1]['NSE'] is not None and score_rows[1]['NSE'] < 0:
         notes.append('Upper-stage held-out NSE is negative; high-flow estimates need particular review.')
-    out = Path(args.out or Path(args.observations).parent/'universal_rating_results')
-    out = out/(Path(args.observations).stem+'_'+datetime.now().strftime('%Y%m%d_%H%M%S_%f'))
+    out = Path(output_folder or measurements.parent/'universal_rating_results').expanduser().resolve()
+    out = out/(measurements.stem+'_'+datetime.now().strftime('%Y%m%d_%H%M%S_%f'))
     out.mkdir(parents=True, exist_ok=False)
     clean = prediction_table(obs, pipeline, cal, obs)
     clean['Q_NestedCV'] = oof
@@ -423,10 +461,10 @@ def run(args):
     grid = pd.DataFrame({'Date': pd.NaT, 'WL': np.linspace(hmin, hmax, 400), 'dWL': np.nan})
     rating = prediction_table(grid, pipeline, cal, obs)
     rating.to_csv(out/'rating_table.csv', index=False)
-    paths = [Path(args.observations)]+([Path(args.daily)] if args.daily else [])
+    paths = [measurements]+([daily_stages] if daily_stages is not None else [])
     metadata = {'settings': asdict(settings), 'input_columns': loaded['columns'],
                 'inputs': [{'path': str(p.resolve()), 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()} for p in paths],
-                'stage_unit': args.stage_unit, 'discharge_unit': args.discharge_unit,
+                'stage_unit': stage_unit, 'discharge_unit': discharge_unit,
                 'stage_min': float(obs.WL.min()), 'stage_max': float(obs.WL.max()),
                 'validation_strategy': strategy, 'notes': notes,
                 'versions': runtime_versions(include_rf=settings.rf)}
@@ -437,13 +475,13 @@ def run(args):
         raise RuntimeError('Saved model round-trip prediction verification failed.')
     equation = equation_text(pipeline['base'])
     (out/'equation.txt').write_text(equation, encoding='utf-8')
-    plots(out, obs, daily_out, rating, oof, pipeline, args.stage_unit, args.discharge_unit)
-    report = [f'# Rating curve: {Path(args.observations).stem}', '',
+    plots(out, obs, daily_out, rating, oof, pipeline, stage_unit, discharge_unit)
+    report = [f'# Rating curve: {measurements.stem}', '',
               f'Selected model: **{pipeline["candidate"]}**. Shape constraint: {settings.shape}.', '',
-              f'{len(obs)} valid measurements. Measured stage range: {obs.WL.min():.6g} to {obs.WL.max():.6g} {args.stage_unit}.', '',
+              f'{len(obs)} valid measurements. Measured stage range: {obs.WL.min():.6g} to {obs.WL.max():.6g} {stage_unit}.', '',
               '## Equation', '', '```text', equation, '```', '', '## Validation', '',
               f'Nested validation uses {strategy}. Every outer test period is excluded from model, threshold, loss and optional RF-weight selection. This evaluates reconstruction across periods, not future-only forecasting.', '',
-              f'Overall held-out RMSE: {full_score["RMSE"]:.3f} {args.discharge_unit}; MAE: {full_score["MAE"]:.3f}; NSE: {full_score["NSE"]}.', '',
+              f'Overall held-out RMSE: {full_score["RMSE"]:.3f} {discharge_unit}; MAE: {full_score["MAE"]:.3f}; NSE: {full_score["NSE"]}.', '',
               '`model_comparison.csv` contains inner model-selection scores. Use `validation_scores.csv` for complete-pipeline held-out performance. R² is omitted because its residual definition duplicates NSE. RMSLE uses log1p(Q / scale), where scale is the 90th-percentile observed discharge in the scored set, so changing discharge units does not change the score.', '',
               '## Uncertainty and predictions', '',
               f'Q_Lower/Q_Upper are an empirical {settings.coverage:.0%} error band calibrated from scaled, absolute nested-CV errors. Coverage is approximate, has not been independently validated, and is not guaranteed under temporal change. Bounds are left blank outside measured stage range.', '',
@@ -460,42 +498,12 @@ def run(args):
     return out
 
 
-def parser():
-    p = argparse.ArgumentParser(prog='rating-curve validated', description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument('observations', help='CSV with paired water levels and measured discharge')
-    p.add_argument('--daily', help='Optional daily water-level CSV')
-    p.add_argument('--out', help='Parent output directory; each run creates a unique subfolder')
-    for flag in ['date-col', 'stage-col', 'discharge-col', 'daily-date-col', 'daily-stage-col', 'date-format']:
-        p.add_argument('--'+flag)
-    p.add_argument('--dayfirst', action='store_true', help='Interpret ambiguous slash dates as day/month/year')
-    p.add_argument('--shape', choices=['monotone', 'convex'], default='monotone')
-    p.add_argument('--max-segments', type=int, choices=[1, 2], default=2)
-    p.add_argument('--min-regime', type=int, default=12)
-    p.add_argument('--threshold', type=float, help='Optional hydraulically justified fixed transition; DL is never used automatically')
-    p.add_argument('--folds', type=int, default=5)
-    p.add_argument('--inner-folds', type=int, default=3)
-    p.add_argument('--selection-metric', choices=['RMSE', 'RMSLE'], default='RMSE')
-    p.add_argument('--rf', action='store_true', help='Compare optional RF residual corrections using daily dWL; requires scikit-learn')
-    p.add_argument('--seed', type=int, default=42)
-    p.add_argument('--coverage', type=float, default=.90)
-    p.add_argument('--stage-unit', default='m', help='Plot label only; does not convert units')
-    p.add_argument('--discharge-unit', default='m3/s', help='Plot label only; does not convert units')
-    return p
-
-
 def main(argv=None):
-    p = parser()
-    args = p.parse_args(argv)
-    if args.folds < 2 or args.inner_folds < 2 or args.min_regime < 5:
-        p.error('folds and inner-folds must be >=2; min-regime must be >=5')
-    if not .5 < args.coverage < 1:
-        p.error('coverage must be between 0.5 and 1 (exclusive)')
-    if args.threshold is not None and args.max_segments != 2:
-        p.error('--threshold requires --max-segments 2')
-    try:
-        run(args)
-    except (ValueError, RuntimeError, OSError, ImportError) as exc:
-        p.exit(2, f'Error: {exc}\n')
+    """Compatibility entry point; command-line handling lives in cli.py."""
+    import sys
+    from .cli import main as cli_main
+
+    cli_main(['validated', *(sys.argv[1:] if argv is None else argv)])
 
 
 if __name__ == '__main__':

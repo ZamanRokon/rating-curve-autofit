@@ -4,14 +4,16 @@ Changes should keep the two rating methods explicit, reproducible, and usable wi
 
 ## Set up
 
-Use Python 3.10 or later, clone the repository, and activate a virtual environment as described in the [README](README.md). Install development and optional RF dependencies:
+Use Python 3.10 or later, clone the repository, and create a virtual environment as described in [setup help](docs/setup.md). Install development and optional RF dependencies into that environment:
 
 ```sh
 python -m pip install -e ".[dev,rf]"
 python -m pytest
 ```
 
-The Python import package is `ratingcurve_autofit`; the distribution is `rating-curve-autofit`. Implementation lives under `src/ratingcurve_autofit`. Root scripts provide source-checkout compatibility, and `examples/` contains synthetic inputs.
+The Python import package is `ratingcurve_autofit`; the distribution is `rating-curve-autofit`. Implementation lives under `src/ratingcurve_autofit`. The single starter script is `run_rating_curve.py`, earlier launchers live in `legacy/`, and `examples/` contains synthetic inputs.
+
+Keep the starter usable by editing ordinary Python variables. Keep command-line parsing in `cli.py`; fitting functions should accept Python values, not parser objects. Add advanced choices to the method guides rather than expanding the starter's settings unnecessarily.
 
 ## Make a change
 

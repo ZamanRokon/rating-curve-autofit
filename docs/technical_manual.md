@@ -4,6 +4,8 @@ This manual describes the station-folder workflow and the code in this
 repository. There are two fitting methods: `additive` and `validated` (a smooth
 rating with nested validation). The optional random forest corrects residuals
 within validated; it is not a third independent rating method.
+Both methods can convert daily stages to discharge after fitting paired
+stage–discharge measurements.
 
 ## Contents
 
@@ -153,7 +155,8 @@ a run under `output/test/validated/`. Open `report.md`, `rating_curve.png` and
 `rating_table.csv` there first.
 
 For daily discharge, change `DAILY_STAGES = "daily_stage.csv"`. This reads
-`input/test/daily_stage.csv` and additionally writes daily estimates and a plot.
+`input/test/daily_stage.csv` and additionally writes
+`daily_discharge_calculated.csv` and `daily_discharge.png` in the run folder.
 For a trial restricted to one regime, set `MAX_SEGMENTS = 1`; `None` restores
 the method's normal candidate range.
 
@@ -163,6 +166,7 @@ In the same script set:
 
 ```python
 METHOD = "additive"
+DAILY_STAGES = "daily_stage.csv"
 MAX_SEGMENTS = 1
 BOOTSTRAP_SAMPLES = 0
 ```
@@ -173,9 +177,13 @@ uncertainty intervals. For the normal additive analysis, set `MAX_SEGMENTS = Non
 and `BOOTSTRAP_SAMPLES = 200`: eligible one-/two-/three-term models are compared,
 then the selected term count is bootstrapped. This can take several minutes.
 
-If `DAILY_STAGES` stays set when you switch to additive, a message explains that
-additive fits measurements only. It does not produce daily discharge. You can
-set `DAILY_STAGES = None` for an explicit measurement-only configuration.
+This also writes `daily_discharge_calculated.csv` and `daily_discharge.png`
+directly in the additive run folder. The CSV gives median and bias-corrected
+mean discharge, with flags for stages outside the measured range. Daily output
+has no uncertainty bounds, including when bootstrap is enabled; bootstrap
+intervals are in the measured-range rating table. Keep `DAILY_STAGES` set when
+switching methods to use the same daily input, or set it to `None` to skip daily
+predictions with either method.
 
 ### What the example represents
 
@@ -225,7 +233,7 @@ Strings need quotes; `None`, `True` and `False` do not.
 |---|---|---|
 | `STATION` | `"test"` | Folder under `input/`; also names its output folder. |
 | `METHOD` | `"validated"` | `"validated"` or `"additive"`. |
-| `DAILY_STAGES` | `None` | Daily filename in the station folder; validated only. |
+| `DAILY_STAGES` | `None` | Both methods: daily filename in the station folder, e.g. `"daily_stage.csv"`; `None` skips daily predictions. |
 | `DATE_FORMAT` | `"%Y-%m-%d"` | Date convention for both CSVs. |
 | `STAGE_UNIT` | `"m"` | Label only; no number conversion. |
 | `DISCHARGE_UNIT` | `"m3/s"` | Label only; no number conversion. |
@@ -275,11 +283,12 @@ on a few dates/years can leave insufficient training data even above 20 total.
 Neither support rule identifies a physical control. Review cleaning counts and
 stage coverage.
 
-Additive needs exact `wl`, `discharge` and optional `date` headers. Validated
+Additive measurements need exact `wl`, `discharge` and optional `date` headers. Validated
 also recognizes aliases such as `stage`, `WL`, `Q`, `flow` and `timestamp`, and
 common delimiters. Use standard comma-separated headers for files used by both
 methods. Ambiguous aliases need renamed headers or explicit column selection.
-Validated reserves `source_row` and `rejection_reason` for audit output.
+Validated measurement input and both methods' daily inputs reserve `source_row`
+and `rejection_reason` for audit output.
 
 ### Daily stages
 
@@ -290,10 +299,19 @@ date,wl
 2020-01-03,1.18
 ```
 
-Dates are required. Rows are sorted by date. Identical duplicates are collapsed;
-conflicting stages for one date stop the analysis. Missing days are not filled
-or interpolated, and invalid rows are reported. A constant optional `DL`
-measurement column supplies a plot reference only, not a fitted transition.
+Both methods use the same daily input checks. Dates and finite stages are
+required, and `DATE_FORMAT` applies to daily dates too. Rows are sorted by date.
+Identical duplicates are collapsed; conflicting stages for one date stop the
+analysis. Missing days are not filled or interpolated. Invalid rows appear in
+`rejected_daily_rows.csv` with the original row number and reason; if no usable
+daily rows remain, the run stops before fitting. Recognized daily header aliases
+and delimiters are shared by both methods, but `date,wl` is the simplest format.
+
+Daily rows do not supply additional discharge measurements. The additive fit
+uses only the paired measurement file. Validated also fits paired measurements;
+its optional random forest can use daily stage changes as additional predictors.
+In validated, a constant optional `DL` measurement column supplies a plot
+reference only, not a fitted transition.
 
 ## Additive method
 
@@ -340,7 +358,10 @@ prediction intervals additionally include simulated lognormal residual noise.
 This does not repeat term-count selection or preserve temporal dependence.
 Check successful refit counts: few successful fits or changing residual spread
 weaken interpretation. Bootstrap 0 produces no intervals. The 100-point rating
-table is confined to the measured stage range.
+table is confined to the measured stage range. Optional daily output evaluates
+the selected equation at each supplied stage and flags extrapolations. It
+contains median/mean estimates only; bootstrap intervals are not transferred
+or extrapolated from the rating table to daily rows.
 
 ## Smooth validated method
 
@@ -399,9 +420,45 @@ there are still reported and flagged as extrapolations.
 
 ## Daily discharge and random forest
 
-Choose validated and a daily CSV in the selected station. Static daily estimates
-need no random forest. The rating table spans measured and supplied daily
-stages; out-of-range rows have extrapolation flags and no error bounds.
+Set these in `run_rating_curve.py`:
+
+```python
+STATION = "test"                  # Or your station folder name
+METHOD = "additive"               # Or "validated"
+DAILY_STAGES = "daily_stage.csv"
+```
+
+Run the same script. Both methods read `input/<station>/measurements.csv` and
+the selected daily file, then write `daily_discharge_calculated.csv` and
+`daily_discharge.png` to `output/<station>/<method>/<run>/`. Daily predictions
+need no random forest. `DAILY_STAGES = None` skips them.
+
+| Daily output | Additive | Validated |
+|---|---|---|
+| Discharge columns | `Q_Median`, `Q_Mean_bias_corrected` | `Q_RatingCurve`, `Q_Estimate` |
+| Uncertainty | No daily bounds; bootstrap intervals remain in `rating_table.csv`. | `Q_Lower`, `Q_Upper`: empirical error band within measured stages. |
+| Range flags | `Stage_extrapolation` | `Stage_extrapolation` and additional support/interval flags. |
+| Role of daily data | Prediction stages only; fitting, selection and bootstrap are unchanged. | Prediction stages; optional daily changes also support residual-forest fitting. |
+
+For additive, `Date`, `WL` and `source_row` identify the date, supplied stage
+and original CSV line. Discharge columns use `DISCHARGE_UNIT`; `WL` uses
+`STAGE_UNIT`. The mean column applies the same lognormal correction as the
+rating table. At or below the fitted zero-flow stage, the equation returns zero;
+this is a model extrapolation, not confirmation of a dry river. The daily plot
+shows both estimates and marks out-of-range stages; missing days break its lines.
+
+Both methods label stages `below_measured_range`, `within_measured_range`, or
+`above_measured_range`; the measured minimum and maximum count as within range.
+An extrapolated estimate is still reported, but needs separate hydraulic
+assessment. Additive's rating table stays within measured stages. Validated's
+table spans measured and supplied daily stages, with blank bounds outside the
+measured range.
+
+Applying a nonlinear rating to daily mean stage does not generally produce
+daily mean discharge. Additive's bias correction estimates a conditional mean
+at the supplied stage; it does not reconstruct within-day stage variability.
+
+### Optional random forest (validated only)
 
 For optional residual correction, install:
 
@@ -447,14 +504,16 @@ backwater, reversing/tidal flow, hysteresis or changing controls.
 | `report.md` | Equation, selection, scores, data notes and uncertainty summary. |
 | `plots/rating_curve.png` | Measurements, median curve and any bootstrap bands. |
 | `rating_table.csv` | 100 measured-range stages, median/mean flow and available intervals. |
+| `daily_discharge_calculated.csv`, `daily_discharge.png` | Daily median/mean estimates and range flags when daily input is supplied; no daily bounds. |
+| `rejected_daily_rows.csv` | Invalid daily source records and reasons, when daily input is supplied; may contain headers only. |
 | `equation.txt` | Median-discharge equation. |
-| `input_quality.json` | Accepted/excluded counts, repeats and data ranges. |
+| `input_quality.json` | Accepted/excluded measurement counts, repeats and data ranges; daily counts and cleaning notes when supplied. |
 | `cleaned_data.csv` | Retained observations. |
 | `best_model.json` | Term count, parameters, equation, measured range and diagnostics. |
 | `best_parameters.csv` | Parameters and available bootstrap bounds. |
 | `model_comparison.csv` | Candidate support, information criteria, CV scores and failures. |
 | `fitted_values_and_residuals.csv` | Median/mean predictions, residuals and outlier flags. |
-| `run_metadata.json` | Input hash, library versions and settings including dates and units. |
+| `run_metadata.json` | Measurement and optional daily input hashes, library versions and settings including dates and units. |
 | Other `plots/` files | Log rating, residual plots, QQ plot, comparison and available time diagnostics. |
 
 Default lookup columns are `stage_m`, `discharge_median_m3/s` and
@@ -546,6 +605,7 @@ from ratingcurve_autofit.additive import run
 result = run(
     "input/test/measurements.csv",
     output_root="output/test/additive",
+    daily_stages="input/test/daily_stage.csv",  # Optional; omit to skip daily predictions.
     max_segments=1, bootstrap_samples=0,
     date_format="%Y-%m-%d", stage_unit="m", discharge_unit="m3/s",
 )
@@ -624,7 +684,9 @@ python -m pip install scikit-learn joblib
 Without these libraries the optional forest tests are skipped. Checks cover
 curve shape/continuity, date-group separation, training-only selection,
 nonfinite inputs, repeated dates, daily gaps, saved-model predictions, station
-routing, units/dates, and preservation of earlier results.
+routing, units/dates, and preservation of earlier results. Additive daily checks
+also cover median/mean calculation, extrapolation flags, rejected daily rows,
+and unchanged fitting/selection/bootstrap when daily input is supplied.
 
 For syntax and undefined-name checks:
 
@@ -650,8 +712,8 @@ or guarantee empirical band coverage.
 | Too few rows in validation groups | Add observations across suitable dates/periods. Same-date rows are not split to manufacture independence. |
 | No eligible two-regime model | Review support on both sides in training folds. `MAX_SEGMENTS = 1` explicitly tests a simpler family. |
 | Conflicting daily duplicates | Resolve differing stages in the input; automatic averaging is not performed. |
-| Blank bounds | Validated omits bands beyond measured stages; additive has no interval columns when bootstrap is disabled/unsuccessful. |
-| No additive daily output | Daily discharge is implemented in validated only. |
+| Blank/missing bounds | Validated omits bands beyond measured stages. Additive daily output has no bounds; its rating table has intervals only when bootstrap fits succeed. |
+| No daily output | For either method, set `DAILY_STAGES` to the daily filename, rerun, and open the new run folder. `None` skips daily predictions. |
 | Forest not selected | Inspect `model_comparison.csv`: feature coverage may be insufficient or the correction may not improve scores. |
 | Long runtime | Multi-regime/term optimization, nested fitting and bootstrap need many fits. For a limited trial use one regime/term and additive bootstrap 0. |
 | Cannot write output | Check permissions/free space and close applications locking files. |

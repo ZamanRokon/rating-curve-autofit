@@ -3,7 +3,7 @@
 # ---- CHOOSE YOUR STATION AND METHOD ----
 STATION = "test"                  # Folder name under input/, e.g. "Feni_Ramgarh"
 METHOD = "validated"              # "validated" (smooth) or "additive"
-DAILY_STAGES = None                # Validated only: "daily_stage.csv", or None
+DAILY_STAGES = None                # Both methods: "daily_stage.csv", or None
 
 # Each station folder must contain measurements.csv with date, wl, discharge.
 DATE_FORMAT = "%Y-%m-%d"           # YYYY-MM-DD; use "%d/%m/%Y" for DD/MM/YYYY
@@ -35,18 +35,18 @@ def main():
     output_folder = HERE / "output" / STATION / METHOD
     if not measurements.is_file():
         raise FileNotFoundError(f"Put measurements.csv in this station folder: {station_folder}")
+    daily = None
+    if DAILY_STAGES is not None:
+        if not DAILY_STAGES or DAILY_STAGES in {".", ".."} or any(c in DAILY_STAGES for c in "/\\:"):
+            raise ValueError("DAILY_STAGES must be a filename in the selected station folder, or None.")
+        daily = station_folder / DAILY_STAGES
+        if not daily.is_file():
+            raise FileNotFoundError(f"Daily stage file not found: {daily}")
     print(f"Station: {STATION} | Method: {METHOD}", flush=True)
 
     if METHOD == "validated":
         from ratingcurve_autofit.validated import Settings, fit_rating_curve
 
-        daily = None
-        if DAILY_STAGES is not None:
-            if not DAILY_STAGES or DAILY_STAGES in {".", ".."} or any(c in DAILY_STAGES for c in "/\\:"):
-                raise ValueError("DAILY_STAGES must be a filename in the selected station folder, or None.")
-            daily = station_folder / DAILY_STAGES
-            if not daily.is_file():
-                raise FileNotFoundError(f"Daily stage file not found: {daily}")
         result = fit_rating_curve(
             measurements, daily_stages=daily, output_folder=output_folder,
             date_format=DATE_FORMAT, stage_unit=STAGE_UNIT, discharge_unit=DISCHARGE_UNIT,
@@ -59,10 +59,8 @@ def main():
     else:
         from ratingcurve_autofit.additive import run
 
-        if DAILY_STAGES is not None:
-            print("The additive method uses measurements only; daily discharge is available with 'validated'.")
         result = run(
-            measurements, output_root=output_folder,
+            measurements, output_root=output_folder, daily_stages=daily,
             max_segments=3 if MAX_SEGMENTS is None else MAX_SEGMENTS,
             bootstrap_samples=BOOTSTRAP_SAMPLES, date_format=DATE_FORMAT,
             stage_unit=STAGE_UNIT, discharge_unit=DISCHARGE_UNIT,
@@ -72,6 +70,9 @@ def main():
     print(f"\nRead the report: {result / 'report.md'}")
     print(f"Rating plot: {plot}")
     print(f"Rating table: {result / 'rating_table.csv'}")
+    if daily is not None:
+        print(f"Daily discharge: {result / 'daily_discharge_calculated.csv'}")
+        print(f"Daily plot: {result / 'daily_discharge.png'}")
     return result
 
 

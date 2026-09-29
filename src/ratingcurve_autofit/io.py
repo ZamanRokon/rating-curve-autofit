@@ -119,6 +119,55 @@ def _reject_report(raw: pd.DataFrame, reasons: list[list[str]]) -> pd.DataFrame:
     return rejected.reset_index(drop=True)
 
 
+def load_daily_stages(
+    daily_path: str | Path,
+    *,
+    daily_date_col: str | None = None,
+    daily_stage_col: str | None = None,
+    date_format: str | None = None,
+    dayfirst: bool = False,
+) -> dict[str, Any]:
+    """Read daily stages for either method, preserving source rows and gaps.
+
+    Invalid rows are reported, equal duplicates collapse, and conflicting
+    stages on the same date raise an error. No missing dates are filled.
+    """
+    notes: list[str] = []
+    daily_raw = _read_csv(daily_path, "daily", notes)
+    daily_cols = {
+        "date": _select_column(daily_raw, "date", daily_date_col, required=True, label="daily"),
+        "stage": _select_column(daily_raw, "stage", daily_stage_col, required=True, label="daily"),
+    }
+    if daily_cols["date"] == daily_cols["stage"]:
+        raise ValueError("daily: date and stage must refer to distinct input columns.")
+    daily = pd.DataFrame({"Date": _dates(daily_raw[daily_cols["date"]], date_format=date_format, dayfirst=dayfirst, label="daily"), "WL": _numbers(daily_raw[daily_cols["stage"]]), "source_row": daily_raw["source_row"]})
+    daily_reasons: list[list[str]] = [[] for _ in range(len(daily))]
+    for i in range(len(daily)):
+        if pd.isna(daily.at[i, "Date"]):
+            daily_reasons[i].append("Date is missing or invalid")
+        if not np.isfinite(daily.at[i, "WL"]):
+            daily_reasons[i].append("WL must be numeric and finite")
+    rejected_daily = _reject_report(daily_raw, daily_reasons)
+    daily = daily.loc[[not reason for reason in daily_reasons]].copy()
+    conflicts = daily.groupby("Date")["WL"].nunique()
+    conflicts = conflicts[conflicts > 1]
+    if len(conflicts):
+        examples = ", ".join(date.strftime("%Y-%m-%d") for date in conflicts.index[:5])
+        raise ValueError(f"daily: conflicting duplicate water levels for {len(conflicts)} dates ({examples}). Resolve or explicitly aggregate these dates before fitting; no automatic averaging is performed.")
+    duplicates = daily.duplicated("Date", keep="first")
+    if duplicates.any():
+        notes.append(f"daily: collapsed {int(duplicates.sum())} duplicate dates with identical WL; retained first source rows.")
+    daily = daily.loc[~duplicates].sort_values("Date", kind="stable").reset_index(drop=True)
+    consecutive = daily["Date"].diff().eq(pd.Timedelta(days=1))
+    daily["dWL"] = daily["WL"].diff().where(consecutive)
+    gap_count = max(int((~consecutive).sum()) - (1 if len(daily) else 0), 0)
+    if gap_count:
+        notes.append(f"daily: {gap_count} calendar-day gaps; dWL after each gap remains NaN.")
+    if len(rejected_daily):
+        notes.append(f"daily: rejected {len(rejected_daily)} input records; see rejected_daily report.")
+    return {"daily": daily, "rejected_daily": rejected_daily, "notes": notes, "columns": daily_cols}
+
+
 def load_inputs(
     q_path: str | Path,
     daily_path: str | Path | None = None,
@@ -187,38 +236,14 @@ def load_inputs(
     daily_cols = None
     rejected_daily = pd.DataFrame(columns=["source_row", "rejection_reason"])
     if daily_path is not None:
-        daily_raw = _read_csv(daily_path, "daily", notes)
-        daily_cols = {
-            "date": _select_column(daily_raw, "date", daily_date_col, required=True, label="daily"),
-            "stage": _select_column(daily_raw, "stage", daily_stage_col, required=True, label="daily"),
-        }
-        if daily_cols["date"] == daily_cols["stage"]:
-            raise ValueError("daily: date and stage must refer to distinct input columns.")
-        daily = pd.DataFrame({"Date": _dates(daily_raw[daily_cols["date"]], date_format=date_format, dayfirst=dayfirst, label="daily"), "WL": _numbers(daily_raw[daily_cols["stage"]]), "source_row": daily_raw["source_row"]})
-        daily_reasons: list[list[str]] = [[] for _ in range(len(daily))]
-        for i in range(len(daily)):
-            if pd.isna(daily.at[i, "Date"]):
-                daily_reasons[i].append("Date is missing or invalid")
-            if not np.isfinite(daily.at[i, "WL"]):
-                daily_reasons[i].append("WL must be numeric and finite")
-        rejected_daily = _reject_report(daily_raw, daily_reasons)
-        daily = daily.loc[[not reason for reason in daily_reasons]].copy()
-        conflicts = daily.groupby("Date")["WL"].nunique()
-        conflicts = conflicts[conflicts > 1]
-        if len(conflicts):
-            examples = ", ".join(date.strftime("%Y-%m-%d") for date in conflicts.index[:5])
-            raise ValueError(f"daily: conflicting duplicate water levels for {len(conflicts)} dates ({examples}). Resolve or explicitly aggregate these dates before fitting; no automatic averaging is performed.")
-        duplicates = daily.duplicated("Date", keep="first")
-        if duplicates.any():
-            notes.append(f"daily: collapsed {int(duplicates.sum())} duplicate dates with identical WL; retained first source rows.")
-        daily = daily.loc[~duplicates].sort_values("Date", kind="stable").reset_index(drop=True)
-        consecutive = daily["Date"].diff().eq(pd.Timedelta(days=1))
-        daily["dWL"] = daily["WL"].diff().where(consecutive)
-        gap_count = max(int((~consecutive).sum()) - (1 if len(daily) else 0), 0)
-        if gap_count:
-            notes.append(f"daily: {gap_count} calendar-day gaps; dWL after each gap remains NaN.")
-        if len(rejected_daily):
-            notes.append(f"daily: rejected {len(rejected_daily)} input records; see rejected_daily report.")
+        loaded_daily = load_daily_stages(
+            daily_path, daily_date_col=daily_date_col, daily_stage_col=daily_stage_col,
+            date_format=date_format, dayfirst=dayfirst,
+        )
+        daily = loaded_daily["daily"]
+        daily_cols = loaded_daily["columns"]
+        rejected_daily = loaded_daily["rejected_daily"]
+        notes.extend(loaded_daily["notes"])
         obs = obs.merge(daily[["Date", "WL", "dWL"]].rename(columns={"WL": "daily_WL"}), on="Date", how="left", validate="many_to_one", sort=False)
         mismatch = obs["daily_WL"].notna() & ~np.isclose(obs["WL"], obs["daily_WL"], rtol=0.0, atol=0.001)
         if mismatch.any():

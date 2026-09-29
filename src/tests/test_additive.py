@@ -39,6 +39,27 @@ class AdditiveTests(unittest.TestCase):
         self.assertTrue(supported)
         self.assertEqual(active_counts, [15])
 
+    def test_daily_zero_flow_and_measured_range_boundaries(self):
+        daily = pd.DataFrame({
+            "Date": pd.date_range("2020-01-01", periods=5),
+            "WL": [-2., -1., 1., 4., 5.], "source_row": np.arange(2, 7),
+        })
+        best = {"params": np.array([-1., np.log10(3.), 2.]), "n_segments": 1, "sigma_ln": 0.2}
+        result = additive.daily_predictions(daily, best, np.array([1., 4.]))
+        np.testing.assert_allclose(result.Q_Median, [0., 0., 12., 75., 108.])
+        np.testing.assert_allclose(result.Q_Mean_bias_corrected, result.Q_Median * np.exp(0.02))
+        self.assertEqual(result.Stage_extrapolation.tolist(), [
+            "below_measured_range", "below_measured_range", "within_measured_range",
+            "within_measured_range", "above_measured_range",
+        ])
+        self.assertNotIn("Q_Median", daily)  # Source frame is preserved.
+
+    def test_daily_overflow_is_reported_instead_of_writing_infinite_discharge(self):
+        daily = pd.DataFrame({"Date": [pd.Timestamp("2020-01-01")], "WL": [1e200], "source_row": [2]})
+        best = {"params": np.array([0., 0., 2.]), "n_segments": 1, "sigma_ln": 0.2}
+        with self.assertRaisesRegex(ValueError, "nonfinite"):
+            additive.daily_predictions(daily, best, np.array([1., 4.]))
+
     def test_selection_prefers_supported_simple_comparable_candidate(self):
         simple = {"success": True, "empirically_supported": True, "cv_rmse_log10": 0.102,
                   "n_segments": 1, "bic": 12.0}

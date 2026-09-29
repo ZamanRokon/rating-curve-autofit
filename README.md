@@ -2,7 +2,7 @@
 
 Fit stage–discharge rating curves for individual stations using either the
 **smooth/validated** or **additive** method. One Python script produces plots,
-equations, rating tables and diagnostic reports.
+equations, rating tables, daily discharge estimates and diagnostic reports.
 
 1. Put your station's `measurements.csv` in `input/<station>/`.
 2. Open `run_rating_curve.py` and set `STATION` and `METHOD`.
@@ -15,8 +15,10 @@ python run_rating_curve.py
 
 Results go to `output/<station>/<method>/<run>/`. Previous runs are kept.
 Start with `STATION = "test"` to use the supplied synthetic data. For daily
-discharge, choose `METHOD = "validated"` and set `DAILY_STAGES` to the filename
-inside that station's folder.
+discharge with **either method**, put a `date,wl` CSV in that station's folder
+and set `DAILY_STAGES = "daily_stage.csv"` (or your filename). Each run adds
+`daily_discharge_calculated.csv` and `daily_discharge.png`. Both methods fit
+the paired measurements; the daily stages supply prediction inputs.
 
 | Folder | Contents |
 |---|---|

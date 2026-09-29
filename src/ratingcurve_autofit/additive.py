@@ -9,6 +9,7 @@ The script fits one to three additive power-law segments, applies empirical
 support checks, evaluates blocked cross-validation, prefers the simplest model
 with comparable predictive accuracy, and calculates bootstrap uncertainty.
 Rating tables are restricted to the observed water-level range.
+Optional daily stages produce discharge estimates with extrapolation flags.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ import pandas as pd
 from scipy.optimize import differential_evolution, minimize
 from scipy.stats import probplot
 
+from .io import load_daily_stages
 from .provenance import json_safe, runtime_versions
 
 
@@ -613,6 +615,43 @@ def save_tables(
     (out_dir / "equation.txt").write_text(equation_text(best) + "\n", encoding="utf-8")
 
 
+def daily_predictions(daily: pd.DataFrame, best: dict, observed_stage: np.ndarray) -> pd.DataFrame:
+    """Apply the fitted curve to daily stages without changing the fitted model."""
+    result = daily[["Date", "WL", "source_row"]].copy()
+    stage = result["WL"].to_numpy(dtype=float)
+    with np.errstate(over="ignore", invalid="ignore"):
+        median = predict_discharge(best["params"], stage, best["n_segments"])
+        mean = median * math.exp(0.5 * best["sigma_ln"] ** 2)
+    if not np.isfinite(median).all() or not np.isfinite(mean).all():
+        raise ValueError("Daily discharge calculation produced nonfinite values. Check the daily stages, units and measured range.")
+    result["Q_Median"] = median
+    result["Q_Mean_bias_corrected"] = mean
+    result["Stage_extrapolation"] = np.select(
+        [stage < observed_stage.min(), stage > observed_stage.max()],
+        ["below_measured_range", "above_measured_range"],
+        default="within_measured_range",
+    )
+    return result
+
+
+def save_daily_plot(out_dir: Path, daily: pd.DataFrame, discharge_unit: str, show_plots: bool) -> None:
+    # Reindex only the plot so missing calendar days break the lines.
+    series = daily.set_index("Date").asfreq("D")
+    plt.figure(figsize=(12, 5))
+    plt.plot(series.index, series["Q_Median"], ".-", color="#2166ac", label="Median discharge")
+    plt.plot(series.index, series["Q_Mean_bias_corrected"], ".--", color="#d95f02", label="Bias-corrected mean discharge")
+    outside = daily["Stage_extrapolation"] != "within_measured_range"
+    if outside.any():
+        plt.scatter(daily.loc[outside, "Date"], daily.loc[outside, "Q_Median"],
+                    color="#b2182b", marker="x", zorder=3, label="Stage outside measured range")
+    plt.xlabel("Date")
+    plt.ylabel(f"Discharge ({discharge_unit})")
+    plt.title("Additive discharge estimates from daily stages")
+    plt.grid(alpha=0.25)
+    plt.legend()
+    finish_plot(out_dir / "daily_discharge.png", show_plots)
+
+
 def finish_plot(path: Path, show_plots: bool) -> None:
     plt.tight_layout()
     plt.savefig(path, dpi=300, bbox_inches="tight")
@@ -738,6 +777,9 @@ def save_report(
     requested_bootstrap: int,
     stage_unit: str = STAGE_UNIT,
     discharge_unit: str = DISCHARGE_UNIT,
+    *,
+    daily_path: Path | None = None,
+    daily: pd.DataFrame | None = None,
 ) -> None:
     lines = [
         "# Empirical Rating Curve Autofit Report",
@@ -769,6 +811,20 @@ def save_report(
             f"| {fit['n_segments']} | {fit['empirically_supported']} | {fit['aicc']:.3f} | {fit['bic']:.3f} | "
             f"{fit['cv_rmse_log10']:.6f} | {fit['rmse']:.6g} | {fit['mae']:.6g} | {fit['pbias_percent']:.3f}% |"
         )
+    if daily is not None:
+        outside = int((daily["Stage_extrapolation"] != "within_measured_range").sum())
+        lines.extend([
+            "", "## Daily Discharge", "",
+            f"Daily stage CSV: `{daily_path}`",
+            f"Daily estimates: {len(daily)}; outside measured stage range: {outside}.",
+            f"`WL` is in {stage_unit}; `Q_Median` and `Q_Mean_bias_corrected` are in {discharge_unit}.",
+            "The fitted equation uses paired measurements only. Daily stages are prediction inputs and do not affect fitting or model selection.",
+            "The mean correction is Q_Median * exp(0.5 * sigma_ln^2), under the constant-variance lognormal error assumption.",
+            "These are estimates at each supplied stage; applying a nonlinear curve to daily mean stage does not generally give daily mean discharge.",
+            "Daily estimates have no uncertainty bounds. Available bootstrap intervals remain in rating_table.csv within the measured stage range.",
+            "Stages outside that range are extrapolations; values at or below the fitted zero-flow stage are zero, not confirmed dry observations.",
+            "Dates are sorted, missing days are not filled, and rejected rows are listed in rejected_daily_rows.csv.",
+        ])
     lines.extend(
         [
             "",
@@ -805,6 +861,8 @@ def save_report(
             "- `model_comparison.csv`",
             "- `fitted_values_and_residuals.csv`",
             "- `rating_table.csv`",
+            *(["- `daily_discharge_calculated.csv`", "- `daily_discharge.png`",
+               "- `rejected_daily_rows.csv`"] if daily is not None else []),
             "- `plots/`",
             "",
             "## Method and Credit",
@@ -832,11 +890,16 @@ def run(
     bootstrap_samples: int = BOOTSTRAP_SAMPLES,
     show_plots: bool = False,
     *,
+    daily_stages: str | Path | None = None,
     date_format: str | None = None,
     stage_unit: str = STAGE_UNIT,
     discharge_unit: str = DISCHARGE_UNIT,
 ) -> Path:
-    """Fit additive curves and return the folder containing this run's results."""
+    """Fit paired measurements; optionally predict discharge at daily stages.
+
+    Daily input never changes the fitted curve or model selection. The returned
+    run folder includes daily median/mean estimates and range flags when supplied.
+    """
     if max_segments not in (1, 2, 3):
         raise ValueError("max_segments must be 1, 2 or 3 for the additive method.")
     requested_bootstrap = max(0, int(bootstrap_samples))
@@ -846,6 +909,17 @@ def run(
     if not input_path.exists():
         raise FileNotFoundError(input_path)
     data, quality = read_input_csv(input_path, date_format=date_format)
+    daily_path = Path(daily_stages).expanduser().resolve() if daily_stages is not None else None
+    loaded_daily = None
+    if daily_path is not None:
+        loaded_daily = load_daily_stages(daily_path, date_format=date_format)
+        if loaded_daily["daily"].empty:
+            raise ValueError("The daily CSV has no valid rows after parsing dates and water levels. Check column mapping and date format.")
+        quality["daily"] = {
+            "rows_used": len(loaded_daily["daily"]),
+            "rows_rejected": len(loaded_daily["rejected_daily"]),
+            "notes": loaded_daily["notes"],
+        }
     stage = data[STAGE_COLUMN].to_numpy(dtype=float)
     discharge = data[DISCHARGE_COLUMN].to_numpy(dtype=float)
     fits = [fit_model(stage, discharge, segments) for segments in candidate_segment_counts(len(data), max_segments)]
@@ -871,6 +945,14 @@ def run(
     notes = diagnostic_warnings(data, best, bootstrap, requested_bootstrap)
     if not np.isfinite(best["cv_rmse_log10"]):
         notes.append("No candidate completed validation; selection used BIC. Cross-validation failures are recorded in model_comparison.csv.")
+    daily_out = None
+    if loaded_daily is not None:
+        daily_out = daily_predictions(loaded_daily["daily"], best, stage)
+        notes.extend(loaded_daily["notes"])
+        if date_format is None:
+            notes.append("Daily dates parsed with dayfirst=False; specify date_format for an explicit calendar convention.")
+        outside = int((daily_out["Stage_extrapolation"] != "within_measured_range").sum())
+        notes.append(f"{outside} daily rows lie outside measured stage range. Daily estimates have no uncertainty bounds; available bootstrap intervals are in rating_table.csv.")
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     out_dir = Path(output_root).expanduser().resolve() / f"{input_path.stem}_{stamp}"
     out_dir.mkdir(parents=True, exist_ok=False)
@@ -883,12 +965,22 @@ def run(
                              "stage_column": STAGE_COLUMN, "discharge_column": DISCHARGE_COLUMN,
                              "date_format": date_format,
                              "stage_unit": stage_unit, "discharge_unit": discharge_unit}}
+    if daily_path is not None:
+        metadata["daily_input"] = {
+            "path": str(daily_path),
+            "sha256": hashlib.sha256(daily_path.read_bytes()).hexdigest(),
+            "columns": loaded_daily["columns"],
+        }
     (out_dir / "run_metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     save_tables(out_dir, data, quality, fits, best, selection_rule, grid, bootstrap, notes,
                 requested_bootstrap, stage_unit, discharge_unit)
     save_plots(out_dir, data, fits, best, grid, bootstrap, show_plots, stage_unit, discharge_unit)
+    if daily_out is not None:
+        daily_out.to_csv(out_dir / "daily_discharge_calculated.csv", index=False)
+        loaded_daily["rejected_daily"].to_csv(out_dir / "rejected_daily_rows.csv", index=False)
+        save_daily_plot(out_dir, daily_out, discharge_unit, show_plots)
     save_report(out_dir, input_path, data, quality, fits, best, selection_rule, bootstrap, notes,
-                requested_bootstrap, stage_unit, discharge_unit)
+                requested_bootstrap, stage_unit, discharge_unit, daily_path=daily_path, daily=daily_out)
     print("")
     print("Empirical rating-curve autofit complete.")
     print(f"Output folder: {out_dir}")

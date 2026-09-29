@@ -1,3 +1,0 @@
-# Compatibility with the original standalone validated workflow.
--r ../requirements.txt
-# Optional residual correction: python -m pip install scikit-learn joblib

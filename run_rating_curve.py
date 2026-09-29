@@ -1,40 +1,76 @@
-"""Edit the settings below, then run this file in Python, Spyder or VS Code.
+"""Choose a station and method below, then run this file. See docs/technical_manual.md."""
 
-First install the libraries: python -m pip install -r requirements.txt
-Then run: python run_rating_curve.py
-Uses the smooth rating method with nested validation; see docs/validated.md.
-"""
+# ---- CHOOSE YOUR STATION AND METHOD ----
+STATION = "test"                  # Folder name under input/, e.g. "Feni_Ramgarh"
+METHOD = "validated"              # "validated" (smooth) or "additive"
+DAILY_STAGES = None                # Validated only: "daily_stage.csv", or None
 
-# ---- EDIT THESE SETTINGS ----
-MEASUREMENTS = "examples/measurements.csv"  # CSV columns: date, wl, discharge
-DAILY_STAGES = None  # Optional: "examples/daily_stage.csv" (date, wl)
-OUTPUT_FOLDER = "results"
-DATE_FORMAT = "%Y-%m-%d"  # YYYY-MM-DD; for DD/MM/YYYY use "%d/%m/%Y"
-STAGE_UNIT = "m"  # Labels only; the program does not convert units.
+# Each station folder must contain measurements.csv with date, wl, discharge.
+DATE_FORMAT = "%Y-%m-%d"           # YYYY-MM-DD; use "%d/%m/%Y" for DD/MM/YYYY
+STAGE_UNIT = "m"                   # Labels only; values are not converted.
 DISCHARGE_UNIT = "m3/s"
+
+# ---- OPTIONAL FITTING CHOICES ----
+MAX_SEGMENTS = None                # None: validated compares 1-2, additive 1-3.
+BOOTSTRAP_SAMPLES = 200            # Additive only; 0 gives a quick run without intervals.
+SHAPE = "monotone"                 # Validated only: "monotone" or "convex".
+USE_RANDOM_FOREST = False          # Validated only; needs daily stages and scikit-learn.
 
 # ---- RUN THE ANALYSIS ----
 from pathlib import Path
 import sys
 
-# Relative paths start beside this script, even when an editor runs it elsewhere.
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "src"))
 
 
 def main():
-    from ratingcurve_autofit import fit_rating_curve
+    # Use one station folder, even when an editor runs from another directory.
+    if not STATION or STATION in {".", ".."} or any(c in STATION for c in "/\\:"):
+        raise ValueError("STATION must be one folder name under input/, such as 'Feni_Ramgarh'.")
+    if METHOD not in {"validated", "additive"}:
+        raise ValueError("METHOD must be 'validated' or 'additive'.")
+    station_folder = HERE / "input" / STATION
+    measurements = station_folder / "measurements.csv"
+    output_folder = HERE / "output" / STATION / METHOD
+    if not measurements.is_file():
+        raise FileNotFoundError(f"Put measurements.csv in this station folder: {station_folder}")
+    print(f"Station: {STATION} | Method: {METHOD}", flush=True)
 
-    result = fit_rating_curve(
-        HERE / Path(MEASUREMENTS).expanduser(),
-        daily_stages=HERE / Path(DAILY_STAGES).expanduser() if DAILY_STAGES is not None else None,
-        output_folder=HERE / Path(OUTPUT_FOLDER).expanduser(),
-        date_format=DATE_FORMAT,
-        stage_unit=STAGE_UNIT,
-        discharge_unit=DISCHARGE_UNIT,
-    )
-    print(f"\nStart with the report: {result / 'report.md'}")
-    print(f"Rating plot: {result / 'rating_curve.png'}")
+    if METHOD == "validated":
+        from ratingcurve_autofit.validated import Settings, fit_rating_curve
+
+        daily = None
+        if DAILY_STAGES is not None:
+            if not DAILY_STAGES or DAILY_STAGES in {".", ".."} or any(c in DAILY_STAGES for c in "/\\:"):
+                raise ValueError("DAILY_STAGES must be a filename in the selected station folder, or None.")
+            daily = station_folder / DAILY_STAGES
+            if not daily.is_file():
+                raise FileNotFoundError(f"Daily stage file not found: {daily}")
+        result = fit_rating_curve(
+            measurements, daily_stages=daily, output_folder=output_folder,
+            date_format=DATE_FORMAT, stage_unit=STAGE_UNIT, discharge_unit=DISCHARGE_UNIT,
+            settings=Settings(
+                max_segments=2 if MAX_SEGMENTS is None else MAX_SEGMENTS,
+                shape=SHAPE, rf=USE_RANDOM_FOREST,
+            ),
+        )
+        plot = result / "rating_curve.png"
+    else:
+        from ratingcurve_autofit.additive import run
+
+        if DAILY_STAGES is not None:
+            print("The additive method uses measurements only; daily discharge is available with 'validated'.")
+        result = run(
+            measurements, output_root=output_folder,
+            max_segments=3 if MAX_SEGMENTS is None else MAX_SEGMENTS,
+            bootstrap_samples=BOOTSTRAP_SAMPLES, date_format=DATE_FORMAT,
+            stage_unit=STAGE_UNIT, discharge_unit=DISCHARGE_UNIT,
+        )
+        plot = result / "plots" / "rating_curve.png"
+
+    print(f"\nRead the report: {result / 'report.md'}")
+    print(f"Rating plot: {plot}")
     print(f"Rating table: {result / 'rating_table.csv'}")
     return result
 

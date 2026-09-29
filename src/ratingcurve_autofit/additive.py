@@ -3,8 +3,7 @@ Original additive stage-discharge rating-curve method.
 Required CSV columns by default: wl, discharge
 Optional CSV column:
     date
-Run:
-    rating-curve additive input.csv
+Run the root run_rating_curve.py script with METHOD = "additive".
 
 The script fits one to three additive power-law segments, applies empirical
 support checks, evaluates blocked cross-validation, prefers the simplest model
@@ -17,7 +16,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import sys
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -426,7 +424,7 @@ def bootstrap_intervals(data: pd.DataFrame, best: dict, grid: np.ndarray, sample
 
 
 # INPUT / OUTPUT
-def read_input_csv(path: Path) -> tuple[pd.DataFrame, dict]:
+def read_input_csv(path: Path, date_format: str | None = None) -> tuple[pd.DataFrame, dict]:
     raw = pd.read_csv(path)
     required = [STAGE_COLUMN, DISCHARGE_COLUMN]
     missing = [column for column in required if column not in raw.columns]
@@ -445,7 +443,7 @@ def read_input_csv(path: Path) -> tuple[pd.DataFrame, dict]:
     out = out.loc[valid].copy()
     invalid_dates = 0
     if DATE_COLUMN in out.columns:
-        parsed_dates = pd.to_datetime(out[DATE_COLUMN], format="mixed", errors="coerce")
+        parsed_dates = pd.to_datetime(out[DATE_COLUMN], format=date_format or "mixed", errors="coerce")
         invalid_dates = int(parsed_dates.isna().sum())
         out[DATE_COLUMN] = parsed_dates
         if parsed_dates.notna().all():
@@ -514,6 +512,8 @@ def save_tables(
     bootstrap: dict,
     notes: list[str],
     requested_bootstrap: int,
+    stage_unit: str = STAGE_UNIT,
+    discharge_unit: str = DISCHARGE_UNIT,
 ) -> None:
     data.to_csv(out_dir / "cleaned_data.csv", index=False)
     (out_dir / "input_quality.json").write_text(json.dumps(quality, indent=2), encoding="utf-8")
@@ -577,9 +577,9 @@ def save_tables(
     mean_curve = median_curve * math.exp(0.5 * best["sigma_ln"] ** 2)
     rating = pd.DataFrame(
         {
-            f"stage_{STAGE_UNIT}": grid,
-            f"discharge_median_{DISCHARGE_UNIT}": median_curve,
-            f"discharge_mean_bias_corrected_{DISCHARGE_UNIT}": mean_curve,
+            f"stage_{stage_unit}": grid,
+            f"discharge_median_{discharge_unit}": median_curve,
+            f"discharge_mean_bias_corrected_{discharge_unit}": mean_curve,
             "within_observed_stage_range": True,
         }
     )
@@ -597,8 +597,8 @@ def save_tables(
         "equation_returns": "conditional median discharge",
         "equation": equation_text(best),
         "observed_stage_range": [float(grid.min()), float(grid.max())],
-        "stage_unit": STAGE_UNIT,
-        "discharge_unit": DISCHARGE_UNIT,
+        "stage_unit": stage_unit,
+        "discharge_unit": discharge_unit,
         "parameters": {name: float(value) for name, value in zip(best["param_names"], best["params"])},
         "sigma_log10": float(best["sigma_log10"]),
         "cv_exact_fraction": float(best["cv_exact"]),
@@ -629,6 +629,8 @@ def save_plots(
     grid: np.ndarray,
     bootstrap: dict,
     show_plots: bool,
+    stage_unit: str = STAGE_UNIT,
+    discharge_unit: str = DISCHARGE_UNIT,
 ) -> None:
     plots_dir = out_dir / "plots"
     plots_dir.mkdir(exist_ok=True)
@@ -642,8 +644,8 @@ def save_plots(
         plt.fill_between(grid, bootstrap["curve_lower"], bootstrap["curve_upper"], color="#3182bd", alpha=0.25, label=f"{level}% curve interval")
     plt.scatter(stage, discharge, s=28, color="#1f77b4", alpha=0.75, label="Observed")
     plt.plot(grid, q_grid, linewidth=2.6, color="#d62728", label=f"Selected: {best['n_segments']} segment(s)")
-    plt.xlabel(f"Water level ({STAGE_UNIT})")
-    plt.ylabel(f"Discharge ({DISCHARGE_UNIT})")
+    plt.xlabel(f"Water level ({stage_unit})")
+    plt.ylabel(f"Discharge ({discharge_unit})")
     plt.title("Empirical Stage-Discharge Rating Curve")
     plt.legend()
     plt.grid(True, alpha=0.25)
@@ -655,8 +657,8 @@ def save_plots(
     plt.scatter(stage, discharge, s=28, color="#1f77b4", alpha=0.75, label="Observed")
     plt.plot(grid, q_grid, linewidth=2.6, color="#d62728", label="Selected curve")
     plt.yscale("log")
-    plt.xlabel(f"Water level ({STAGE_UNIT})")
-    plt.ylabel(f"Discharge ({DISCHARGE_UNIT}, log scale)")
+    plt.xlabel(f"Water level ({stage_unit})")
+    plt.ylabel(f"Discharge ({discharge_unit}, log scale)")
     plt.title("Rating Curve on Log-Discharge Scale")
     plt.legend()
     plt.grid(True, alpha=0.25, which="both")
@@ -671,8 +673,8 @@ def save_plots(
         colorbar.set_ticks(ticks)
         colorbar.set_ticklabels([pd.Timestamp.fromordinal(int(value)).strftime("%Y-%m-%d") for value in ticks])
         colorbar.set_label("Observation date")
-        plt.xlabel(f"Water level ({STAGE_UNIT})")
-        plt.ylabel(f"Discharge ({DISCHARGE_UNIT})")
+        plt.xlabel(f"Water level ({stage_unit})")
+        plt.ylabel(f"Discharge ({discharge_unit})")
         plt.title("Rating Observations Coloured by Date")
         plt.legend()
         plt.grid(True, alpha=0.25)
@@ -681,7 +683,7 @@ def save_plots(
     plt.figure(figsize=(9, 5))
     plt.axhline(0.0, color="black", linewidth=1)
     plt.scatter(stage, residuals, s=28, color="#2ca02c", alpha=0.75)
-    plt.xlabel(f"Water level ({STAGE_UNIT})")
+    plt.xlabel(f"Water level ({stage_unit})")
     plt.ylabel("log10(Q observed) - log10(Q fitted)")
     plt.title("Residuals vs Water Level")
     plt.grid(True, alpha=0.25)
@@ -690,7 +692,7 @@ def save_plots(
     plt.axhline(0.0, color="black", linewidth=1)
     plt.scatter(best["fitted_median"], residuals, s=28, color="#ff7f0e", alpha=0.75)
     plt.xscale("log")
-    plt.xlabel(f"Fitted median discharge ({DISCHARGE_UNIT}, log scale)")
+    plt.xlabel(f"Fitted median discharge ({discharge_unit}, log scale)")
     plt.ylabel("Log10 residual")
     plt.title("Residuals vs Fitted Discharge")
     plt.grid(True, alpha=0.25, which="both")
@@ -734,6 +736,8 @@ def save_report(
     bootstrap: dict,
     notes: list[str],
     requested_bootstrap: int,
+    stage_unit: str = STAGE_UNIT,
+    discharge_unit: str = DISCHARGE_UNIT,
 ) -> None:
     lines = [
         "# Empirical Rating Curve Autofit Report",
@@ -741,8 +745,8 @@ def save_report(
         f"Generated: {datetime.now().isoformat(timespec='seconds')}",
         f"Input CSV: `{input_path}`",
         f"Valid paired observations used: {len(data)} of {quality['rows_read']}",
-        f"Observed water-level range: {data[STAGE_COLUMN].min():.6g} to {data[STAGE_COLUMN].max():.6g} {STAGE_UNIT}",
-        f"Observed discharge range: {data[DISCHARGE_COLUMN].min():.6g} to {data[DISCHARGE_COLUMN].max():.6g} {DISCHARGE_UNIT}",
+        f"Observed water-level range: {data[STAGE_COLUMN].min():.6g} to {data[STAGE_COLUMN].max():.6g} {stage_unit}",
+        f"Observed discharge range: {data[DISCHARGE_COLUMN].min():.6g} to {data[DISCHARGE_COLUMN].max():.6g} {discharge_unit}",
         "",
         "## Selected Model",
         "",
@@ -827,14 +831,21 @@ def run(
     max_segments: int = MAX_SEGMENTS,
     bootstrap_samples: int = BOOTSTRAP_SAMPLES,
     show_plots: bool = False,
+    *,
+    date_format: str | None = None,
+    stage_unit: str = STAGE_UNIT,
+    discharge_unit: str = DISCHARGE_UNIT,
 ) -> Path:
+    """Fit additive curves and return the folder containing this run's results."""
+    if max_segments not in (1, 2, 3):
+        raise ValueError("max_segments must be 1, 2 or 3 for the additive method.")
     requested_bootstrap = max(0, int(bootstrap_samples))
     if not input_csv:
         raise ValueError("Provide an input CSV path.")
     input_path = Path(input_csv).expanduser().resolve()
     if not input_path.exists():
         raise FileNotFoundError(input_path)
-    data, quality = read_input_csv(input_path)
+    data, quality = read_input_csv(input_path, date_format=date_format)
     stage = data[STAGE_COLUMN].to_numpy(dtype=float)
     discharge = data[DISCHARGE_COLUMN].to_numpy(dtype=float)
     fits = [fit_model(stage, discharge, segments) for segments in candidate_segment_counts(len(data), max_segments)]
@@ -870,11 +881,14 @@ def run(
                              "confidence_level": CONFIDENCE_LEVEL, "simplicity_tolerance": SIMPLICITY_TOLERANCE,
                              "global_maxiter": GLOBAL_MAXITER, "fast_maxiter": FAST_MAXITER,
                              "stage_column": STAGE_COLUMN, "discharge_column": DISCHARGE_COLUMN,
-                             "stage_unit": STAGE_UNIT, "discharge_unit": DISCHARGE_UNIT}}
+                             "date_format": date_format,
+                             "stage_unit": stage_unit, "discharge_unit": discharge_unit}}
     (out_dir / "run_metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-    save_tables(out_dir, data, quality, fits, best, selection_rule, grid, bootstrap, notes, requested_bootstrap)
-    save_plots(out_dir, data, fits, best, grid, bootstrap, show_plots)
-    save_report(out_dir, input_path, data, quality, fits, best, selection_rule, bootstrap, notes, requested_bootstrap)
+    save_tables(out_dir, data, quality, fits, best, selection_rule, grid, bootstrap, notes,
+                requested_bootstrap, stage_unit, discharge_unit)
+    save_plots(out_dir, data, fits, best, grid, bootstrap, show_plots, stage_unit, discharge_unit)
+    save_report(out_dir, input_path, data, quality, fits, best, selection_rule, bootstrap, notes,
+                requested_bootstrap, stage_unit, discharge_unit)
     print("")
     print("Empirical rating-curve autofit complete.")
     print(f"Output folder: {out_dir}")
@@ -884,14 +898,3 @@ def run(
     print(f"Bootstrap fits: {bootstrap.get('successful', 0)} / {requested_bootstrap}")
     print("")
     return out_dir
-
-
-def main(argv: list[str] | None = None) -> None:
-    """Compatibility entry point; command-line handling lives in cli.py."""
-    from .cli import main as cli_main
-
-    cli_main(["additive", *(sys.argv[1:] if argv is None else argv)])
-
-
-if __name__ == "__main__":
-    main()

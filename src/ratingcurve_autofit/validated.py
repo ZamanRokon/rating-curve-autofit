@@ -1,7 +1,7 @@
 """Reusable CSV rating-curve fitting, nested validation and daily prediction.
 
-Run: rating-curve validated measured.csv --daily daily_stage.csv
-See docs/validated.md for settings, assumptions and output definitions.
+Run the root run_rating_curve.py script with METHOD = "validated".
+See docs/technical_manual.md for settings, assumptions and output definitions.
 """
 from __future__ import annotations
 
@@ -372,7 +372,7 @@ def fit_rating_curve(
     The default compares one/two regimes with nested validation and no random
     forest. Advanced fitting choices can be supplied through ``Settings``.
     This function raises ValueError for invalid settings/data and OSError for
-    unreadable inputs or unwritable outputs. See docs/validated.md for details.
+    unreadable inputs or unwritable outputs. See docs/technical_manual.md for details.
     """
     settings = settings or Settings()
     if settings.shape not in {'monotone', 'convex'}:
@@ -496,15 +496,3 @@ def fit_rating_curve(
     print(f'Selected: {pipeline["candidate"]} | nested RMSE={full_score["RMSE"]:.3f} | NSE={full_score["NSE"]}', flush=True)
     print(f'Output: {out.resolve()}', flush=True)
     return out
-
-
-def main(argv=None):
-    """Compatibility entry point; command-line handling lives in cli.py."""
-    import sys
-    from .cli import main as cli_main
-
-    cli_main(['validated', *(sys.argv[1:] if argv is None else argv)])
-
-
-if __name__ == '__main__':
-    main()

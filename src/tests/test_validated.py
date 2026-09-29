@@ -1,6 +1,6 @@
 """Behavioral checks for reusable stage-discharge fitting and input loading.
 
-Run with: python -m unittest discover -s tests -v
+Run with: python -B -m pytest src/tests -q -p no:cacheprovider
 """
 
 import json
@@ -8,8 +8,6 @@ from contextlib import redirect_stdout
 import importlib.util
 import io
 from pathlib import Path
-import subprocess
-import sys
 import tempfile
 import unittest
 
@@ -19,7 +17,7 @@ import pandas as pd
 from ratingcurve_autofit.core import fit_curve, predict_curve
 from ratingcurve_autofit.io import load_inputs
 from ratingcurve_autofit.validated import (
-    Settings, calibration, load_model, make_folds, metrics, nested_validation,
+    Settings, calibration, fit_rating_curve, load_model, make_folds, metrics, nested_validation,
     predict_pipeline, prediction_table, rf_fit, save_model, select_pipeline,
 )
 
@@ -268,18 +266,17 @@ class PipelineTests(unittest.TestCase):
             0.1 * (table.Q_Estimate.iloc[2] + 1.0),
         )
 
-    def cli(self, observations, *extra):
+    def run_workflow(self, observations, *, daily_stages=None, rf=False):
         path = self.root / "measurements.csv"
         observations.to_csv(path, index=False)
-        command = [sys.executable, "-m", "ratingcurve_autofit", "validated",
-                   str(path), "--max-segments", "1", "--folds", "3", "--inner-folds", "3",
-                   "--out", str(self.root / "results"), *extra]
-        return subprocess.run(command, capture_output=True, text=True, timeout=60)
+        return fit_rating_curve(
+            path, daily_stages=daily_stages, output_folder=self.root / "results",
+            settings=Settings(max_segments=1, folds=3, inner_folds=3, rf=rf),
+        )
 
-    def test_cli_twenty_measurements_without_dates_produces_reviewable_outputs(self):
+    def test_twenty_measurements_without_dates_produces_reviewable_outputs(self):
         observed = self.observations(n=20)[["WL", "Q"]]
-        process = self.cli(observed)
-        self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
+        self.run_workflow(observed)
         outputs = list((self.root / "results").glob("*"))
         self.assertEqual(len(outputs), 1)
         result = outputs[0]
@@ -294,14 +291,13 @@ class PipelineTests(unittest.TestCase):
         restored = load_model(result / "model.json")
         np.testing.assert_allclose(predict_pipeline(restored, measured), measured.Q_Estimate, rtol=1e-12)
 
-    def test_cli_reports_insufficient_data_before_creating_outputs(self):
-        process = self.cli(self.observations(n=19)[["WL", "Q"]])
-        self.assertEqual(process.returncode, 2)
-        self.assertIn("At least 20", process.stderr)
+    def test_insufficient_data_fails_before_creating_outputs(self):
+        with self.assertRaisesRegex(ValueError, "At least 20"):
+            self.run_workflow(self.observations(n=19)[["WL", "Q"]])
         self.assertFalse((self.root / "results").exists())
 
     @unittest.skipUnless(importlib.util.find_spec("sklearn") is not None, "optional scikit-learn unavailable")
-    def test_cli_compares_residual_rf_and_produces_complete_daily_predictions(self):
+    def test_residual_rf_produces_complete_daily_predictions(self):
         dates = pd.date_range("2020-01-01", periods=61)
         stage = 6.0 + 2.0 * np.sin(np.arange(61) * 0.35)
         daily = pd.DataFrame({"Date": dates, "WL": stage})
@@ -311,8 +307,7 @@ class PipelineTests(unittest.TestCase):
             "Date": dates[1:], "WL": stage[1:],
             "Q": 3.0 * stage[1:]**2 + 8.0 * np.diff(stage),
         })
-        process = self.cli(observed, "--daily", str(daily_path), "--rf")
-        self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
+        self.run_workflow(observed, daily_stages=daily_path, rf=True)
         result = next((self.root / "results").glob("*"))
         comparison = pd.read_csv(result / "model_comparison.csv")
         residual_candidates = comparison[comparison.Alpha > 0]

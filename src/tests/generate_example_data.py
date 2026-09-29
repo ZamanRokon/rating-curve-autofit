@@ -7,7 +7,8 @@ import pandas as pd
 
 
 def main():
-    root = Path(__file__).resolve().parent
+    root = Path(__file__).resolve().parents[2] / "input" / "test"
+    root.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(20260907)
     day = np.arange(90)
     dates = pd.date_range("2020-01-01", periods=len(day))

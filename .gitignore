@@ -1,29 +1,27 @@
+# Local station inputs; commit only the supplied synthetic example by default.
+input/*
+!input/test/
+input/test/*
+!input/test/measurements.csv
+!input/test/daily_stage.csv
+
+# Results are local. Keep the empty example destination in Git.
+output/**
+!output/test/
+!output/test/.gitkeep
+
+# Python environments, caches and optional saved forests.
 __pycache__/
 *.py[cod]
+*.egg-info/
 .venv/
 venv/
 env/
-
-rating_curve_results/
-test_outputs/
-*.log
-
-# Generated outputs and build products
-universal_rating_results/
-outputs/
-results/
-build/
-dist/
-*.egg-info/
 .pytest_cache/
 .ruff_cache/
-.coverage
-htmlcov/
-
-# Local environments and secrets
+*.joblib
+*.log
 .env
 .env.*
-!.env.example
-*.joblib
 .DS_Store
 Thumbs.db

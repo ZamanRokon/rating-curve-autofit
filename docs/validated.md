@@ -8,7 +8,9 @@ The `validated` backend compares one- and two-regime curves, evaluates the whole
 rating-curve validated examples/measurements.csv --daily examples/daily_stage.csv --date-format "%Y-%m-%d" --out results/validated
 ```
 
-Equivalent commands are `python -m ratingcurve_autofit validated ...` and, from the repository root, `python universal_rating_curve.py ...`.
+The beginner workflow is `python run_rating_curve.py`; edit its settings as explained in the [README](../README.md). Python callers can use `from ratingcurve_autofit import fit_rating_curve`; see [advanced use](advanced.md).
+
+Equivalent CLI commands are `python -m ratingcurve_autofit validated ...` and, from the repository root, `python legacy/universal_rating_curve.py ...`.
 
 Without daily stages, omit `--daily`; fitting, nested validation, the rating table, and reports still run. Add `--shape convex` when upward curvature is physically justified. Convexity permits a straight branch at exponent one and does not guarantee a visibly curved result.
 

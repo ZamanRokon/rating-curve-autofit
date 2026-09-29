@@ -1,12 +1,10 @@
 """
-Empirical stage-discharge rating-curve autofit script.
+Original additive stage-discharge rating-curve method.
 Required CSV columns by default: wl, discharge
 Optional CSV column:
     date
 Run:
-    python rating_curve_autofit.py input.csv
-Or edit the USER SETTINGS block and run:
-    python rating_curve_autofit.py
+    rating-curve additive input.csv
 
 The script fits one to three additive power-law segments, applies empirical
 support checks, evaluates blocked cross-validation, prefers the simplest model
@@ -16,7 +14,6 @@ Rating tables are restricted to the observed water-level range.
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import math
@@ -34,8 +31,7 @@ from scipy.stats import probplot
 from .provenance import json_safe, runtime_versions
 
 
-# USER SETTINGS
-INPUT_CSV = ""  # Example: r"C:\path\to\input.csv"; leave blank to use command line.
+# METHOD DEFAULTS (for a beginner workflow, edit run_rating_curve.py)
 OUTPUT_ROOT = "rating_curve_results"
 
 DATE_COLUMN = "date"  # Optional. Time diagnostics are skipped when unavailable.
@@ -826,7 +822,7 @@ def save_report(
 
 # WORKFLOW
 def run(
-    input_csv: str | Path = INPUT_CSV,
+    input_csv: str | Path,
     output_root: str | Path = OUTPUT_ROOT,
     max_segments: int = MAX_SEGMENTS,
     bootstrap_samples: int = BOOTSTRAP_SAMPLES,
@@ -834,7 +830,7 @@ def run(
 ) -> Path:
     requested_bootstrap = max(0, int(bootstrap_samples))
     if not input_csv:
-        raise ValueError("Provide an input CSV path or set INPUT_CSV in USER SETTINGS.")
+        raise ValueError("Provide an input CSV path.")
     input_path = Path(input_csv).expanduser().resolve()
     if not input_path.exists():
         raise FileNotFoundError(input_path)
@@ -891,18 +887,10 @@ def run(
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="rating-curve additive", description="Fit an empirical rating curve from paired water level and discharge.")
-    parser.add_argument("csv", nargs="?", default=INPUT_CSV, help="CSV containing wl and discharge; date is optional.")
-    parser.add_argument("--out", default=OUTPUT_ROOT, help="Output root folder.")
-    parser.add_argument("--max-segments", type=int, default=MAX_SEGMENTS, choices=(1, 2, 3))
-    parser.add_argument("--bootstrap", type=int, default=BOOTSTRAP_SAMPLES, help="Bootstrap resamples; use 0 to disable.")
-    parser.add_argument("--show-plots", action="store_true", help="Display plots as well as saving them.")
-    if argv is None and "ipykernel" in sys.modules:
-        argv = []
-    args = parser.parse_args(argv)
-    if not args.csv:
-        raise SystemExit("Provide an input CSV path or edit INPUT_CSV at the top of the script.")
-    run(args.csv, args.out, args.max_segments, args.bootstrap, args.show_plots)
+    """Compatibility entry point; command-line handling lives in cli.py."""
+    from .cli import main as cli_main
+
+    cli_main(["additive", *(sys.argv[1:] if argv is None else argv)])
 
 
 if __name__ == "__main__":

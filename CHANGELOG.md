@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — simpler Python workflow
+
+- One starter, `run_rating_curve.py`: edit CSV paths, date format and unit labels,
+  then run in Python or an editor. Relative paths resolve beside the script.
+- Beginner README organized around installation, an example, station data and results.
+- Direct `fit_rating_curve(...)` Python function for the smooth workflow. It
+  accepts normal values, returns a result folder, and checks settings for both
+  Python and command-line callers.
+- All command-line argument handling consolidated in `cli.py`.
+- Earlier launchers, sample and duplicate requirements moved to `legacy/`.
+  Old source-checkout commands need the `legacy/` prefix; old import shims should
+  be replaced with package imports. Installed commands keep their options.
+- The starter explicitly uses the smooth method. Both fitting algorithms,
+  validation defaults and output schemas are preserved. Advanced use remains
+  documented separately, including the original additive method.
+- The internal smooth `run(args)`/`parser()` interface is replaced by
+  `fit_rating_curve(...)`; additive callers now supply their CSV path explicitly.
+
 ## 0.2.0 — Unreleased
 
 ### Added

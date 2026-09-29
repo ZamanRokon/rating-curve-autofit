@@ -24,6 +24,24 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn("additive", result.stdout)
         self.assertIn("validated", result.stdout)
 
+    def test_legacy_launchers_still_reach_their_method_help(self):
+        root = Path(__file__).resolve().parents[1]
+        for filename, method in [("rating_curve_autofit.py", "additive"),
+                                 ("universal_rating_curve.py", "validated")]:
+            with self.subTest(method=method):
+                result = subprocess.run(
+                    [sys.executable, str(root / "legacy" / filename), "--help"],
+                    cwd=tempfile.gettempdir(), capture_output=True, text=True, timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(f"rating-curve {method}", result.stdout)
+
+    def test_validated_settings_error_is_readable_without_a_traceback(self):
+        result = self.command("validated", "missing.csv", "--coverage", "1")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("coverage", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
     def test_additive_cli_writes_finite_rating_with_bootstrap_disabled(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

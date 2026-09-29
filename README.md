@@ -1,73 +1,50 @@
 # Rating Curve Autofit
 
-Fit stage–discharge rating curves from CSV measurements, compare candidate curves, and export equations, diagnostics, uncertainty estimates, and rating tables. Two methods live in one Python package so their assumptions and results remain explicit.
+Turn measured water levels and discharge into a rating curve, a lookup table,
+and a short report. You only need to edit a few settings in
+[`run_rating_curve.py`](run_rating_curve.py), then run it.
 
-| Method | What it does | Choose it when |
-|---|---|---|
-| **`additive`** | Fits one to three additive power-law terms in log discharge; selects with cross-validation and estimates bootstrap intervals. | You want the repository's original empirical method, positive-flow fitting, and separate median/mean rating tables. |
-| **`validated`** | Fits one or two regimes with matching value and slope, evaluates the full selection procedure with nested validation, and optionally predicts a daily series. | You want daily discharge estimates, explicit shape constraints, zero-flow handling, and complete-pipeline validation. |
+## 1. Install once
 
-Both methods are empirical tools for one station and a consistent stage datum. They do not automatically establish hydraulic controls or resolve backwater, reversing flow, changing controls, or hysteresis. The `validated` name describes its validation workflow; it is not a certification of any station's rating. See the [method comparison](docs/methods.md).
-
-## Install
-
-Requires **Python 3.10 or later**. From a terminal:
+Use **Python 3.10 or later**. Download this repository using **Code → Download
+ZIP** on GitHub and extract it, or clone it with Git. Open a terminal in the
+extracted repository folder and install the four required libraries:
 
 ```sh
-git clone https://github.com/ZamanRokon/rating-curve-autofit.git
-cd rating-curve-autofit
-python -m venv .venv
+python -m pip install -r requirements.txt
 ```
 
-Activate the environment on Windows PowerShell:
+If you use Spyder or VS Code, install into the same Python environment your
+editor uses. See [setup help](docs/setup.md) if Python or a library is not found.
 
-```powershell
-.venv\Scripts\Activate.ps1
-```
+## 2. Try the example
 
-Or on macOS/Linux:
+Run the script from that folder:
 
 ```sh
-source .venv/bin/activate
+python run_rating_curve.py
 ```
 
-Then install from the checkout:
+You can also open `run_rating_curve.py` in Spyder or VS Code and press **Run**.
+Keep it in the repository folder. The supplied data are synthetic, so you can
+try the complete workflow before preparing station data. Fitting and validation
+can take several minutes; progress is printed for each validation period.
 
-```sh
-python -m pip install -e .
-```
+The script prints the location of a new folder under `results/`. Open:
 
-If your shell cannot find `rating-curve`, use `python -m ratingcurve_autofit` with the same arguments. The package is installed from this repository; these instructions do not assume a PyPI release.
+| File | What to use it for |
+|---|---|
+| `report.md` | Read the fitted equation, validation results and data notes. |
+| `rating_curve.png` | Check the fitted curve against your measurements. |
+| `rating_table.csv` | Look up discharge (`Q_RatingCurve`) for water level (`WL`). |
+| `equation.txt` | Copy the fitted stage–discharge equation. |
 
-## Try both methods
+Each run gets its own folder. Existing results and input files are preserved.
+Additional diagnostic files are explained in the [method guide](docs/validated.md#outputs-and-uncertainty).
 
-The included [measurement](examples/measurements.csv) and [daily stage](examples/daily_stage.csv) files are **synthetic**, provided to exercise the software. They are not field observations or evidence of accuracy at a real station.
+## 3. Use your measurements
 
-Start with a smaller additive run:
-
-```sh
-rating-curve additive examples/measurements.csv --max-segments 1 --bootstrap 0 --out results/additive
-```
-
-Compare up to three additive terms and request the default 200 bootstrap resamples:
-
-```sh
-rating-curve additive examples/measurements.csv --out results/additive
-```
-
-Fit the smooth method and calculate discharge for daily stages:
-
-```sh
-rating-curve validated examples/measurements.csv --daily examples/daily_stage.csv --date-format "%Y-%m-%d" --out results/validated
-```
-
-To require upward curvature, add `--shape convex` to the `validated` command. Convexity allows a straight branch when its exponent is one. The default `monotone` constraint allows either curvature while keeping the stage-only rating nondecreasing.
-
-Each run writes a timestamped subfolder and prints its location. Read that run's `report.md` first. Bootstrap and nested fits can take several minutes; the first command disables bootstrap for a quick check, so it does not produce uncertainty intervals.
-
-## Use your data
-
-A common CSV format works with both methods:
+Save a comma-separated CSV with these column names:
 
 ```csv
 date,wl,discharge
@@ -76,9 +53,32 @@ date,wl,discharge
 2020-02-01,2.10,33.50
 ```
 
-This illustrates the schema only: a run needs **at least 20 usable observations**, and more may be necessary for validation and multiple regimes. Dates are recommended. Use one set of stage and discharge units throughout; unit options change labels and do not convert numbers.
+Here `wl` is water level and `discharge` is measured flow. Dates are recommended
+but may be omitted. The three rows above show the format only: provide at least
+**20 usable measurements**, with varying discharge and at least five distinct
+water levels. Validation may require more data, particularly when measurements
+are concentrated on a few dates. Use one station and one stage datum.
 
-For daily prediction with `validated`, supply a second file:
+Open `run_rating_curve.py` and edit the settings at the top:
+
+```python
+MEASUREMENTS = "my_measurements.csv"
+DAILY_STAGES = None
+OUTPUT_FOLDER = "results"
+DATE_FORMAT = "%Y-%m-%d"
+STAGE_UNIT = "m"
+DISCHARGE_UNIT = "m3/s"
+```
+
+Place `my_measurements.csv` beside the script, or use a full path such as
+`"C:/Hydrology/Station_A/measurements.csv"`. Relative paths start from the script's
+folder, including when you run it from an editor. For dates like `31/01/2020`,
+change `DATE_FORMAT` to `"%d/%m/%Y"`. Units are labels; values are **not converted**.
+Use a decimal point for numbers. Then run the same script again.
+
+## Optional: calculate daily discharge
+
+Prepare a second CSV containing daily water levels:
 
 ```csv
 date,wl
@@ -87,44 +87,45 @@ date,wl
 2020-01-03,1.18
 ```
 
-Replace the example paths in the commands with your files. The `validated` loader recognizes common header aliases and provides explicit column and date-format overrides. The additive workflow uses the `wl`, `discharge`, and optional `date` schema above.
+Set `DAILY_STAGES = "my_daily_stages.csv"` and run again. To try the supplied
+example, use `DAILY_STAGES = "examples/daily_stage.csv"`. Both files must use
+the same date format and stage datum. The results now also include
+`daily_discharge_calculated.csv` and `daily_discharge.png`; `Q_Estimate` contains
+the discharge estimates. Inspect `Stage_extrapolation` before using them.
 
-| Guide | Contents |
-|---|---|
-| [Method comparison](docs/methods.md) | Equations, selection, shape, uncertainty, and fair comparisons. |
-| [Additive method](docs/additive.md) | Input requirements, options, bootstrap outputs, and Python use. |
-| [Validated method](docs/validated.md) | Input mapping, daily features, nested validation, optional RF, and saved models. |
+## What the script fits
 
-## Optional random forest
+The starter uses the **smooth rating method**, named `validated` in the package.
+It compares one- and two-regime power-law curves, checks predictions on omitted
+periods, and saves an empirical error band. Random forest is off. The original
+**additive method** remains available through the [advanced guide](docs/advanced.md).
+The two methods have different equations and uncertainty calculations.
 
-The `validated` method uses the stage-only curve by default. To let its inner validation compare random-forest residual corrections:
+Review the plot, rejected observations and validation results before adopting
+a station rating. Estimates outside the measured stage range are flagged and
+have no error bounds. The bands do not guarantee coverage, and the method does
+not resolve backwater, hysteresis or changing controls. Discharge calculated
+from daily mean stage is not necessarily daily mean discharge.
 
-```sh
-python -m pip install -e ".[rf]"
-rating-curve validated examples/measurements.csv --daily examples/daily_stage.csv --rf --out results/validated_rf
+## Where things live
+
+```text
+run_rating_curve.py       Start here: edit settings and run
+requirements.txt         Libraries to install
+examples/                Synthetic measurements and daily stages
+docs/                    Setup, advanced use and method explanations
+src/ratingcurve_autofit/  Fitting, input loading and output code
+tests/                   Checks for the calculations and workflows
+legacy/                  Earlier launchers and sample files
+results/                 Your generated output (created when you run)
 ```
 
-`--rf` requires a daily stage file and sufficient usable daily stage changes in the training folds. It does not force selection of the forest. A selected correction varies with daily stage change and does not inherit the static curve's monotonicity or convexity guarantee.
-
-## Compatibility and development
-
-The original source-checkout command remains available:
-
-```sh
-python rating_curve_autofit.py examples/measurements.csv --max-segments 1 --bootstrap 0
-```
-
-The smooth method also has a source launcher, `universal_rating_curve.py`. Installation is recommended for imports and the unified command. New Python code should import from `ratingcurve_autofit`, rather than rely on the old standalone module layout.
-
-For development:
-
-```sh
-python -m pip install -e ".[dev,rf]"
-python -m pytest
-```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and [CHANGELOG.md](CHANGELOG.md) for changes. Keep station data and generated result folders outside commits; the public examples are synthetic.
+For more detail: [setup help](docs/setup.md), [advanced Python and command-line
+use](docs/advanced.md), [method comparison](docs/methods.md),
+[contributing](CONTRIBUTING.md), and [changes](CHANGELOG.md).
 
 ## License and credit
 
-The repository retains its [MIT license](LICENSE) and the original additive method's attribution. It is an independent project, not affiliated with or endorsed by USACE-RMC, IWR, ERDC-CHL, or BaRatin-tools. Published hydraulic methods inform the work; neither backend is a Bayesian BaRatin implementation. References and implementation provenance are recorded in [SOURCES_AND_CREDIT.md](SOURCES_AND_CREDIT.md).
+[MIT license](LICENSE). Independent project, not affiliated with or endorsed by
+USACE-RMC, IWR, ERDC-CHL or BaRatin-tools. Neither method is a Bayesian BaRatin
+implementation. See [sources and credit](SOURCES_AND_CREDIT.md).
